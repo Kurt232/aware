@@ -10,8 +10,6 @@ from functools import partial
 from timm.models.layers import DropPath
 from timm.models.layers.helpers import to_2tuple
 
-from dataclasses import dataclass
-
 class Mlp(nn.Module):
     """ MLP as used in Vision Transformer, MLP-Mixer and related networks
     """
@@ -618,6 +616,9 @@ class UniTS(nn.Module):
             self.right_prob = args.right_prob
             self.min_mask_ratio = args.min_mask_ratio
             self.max_mask_ratio = args.max_mask_ratio
+            self.phase = 'all'
+        else:
+            self.phase = args.phase
         
         self.is_pretrain = is_pretrain
 
@@ -659,6 +660,13 @@ class UniTS(nn.Module):
         if is_pretrain:
             self.pretrain_head = ForecastHead(
                 args.d_model, args.patch_len, args.stride, args.stride, prefix_token_length=1, head_dropout=args.dropout)
+
+        if self.phase == 'cls':
+            for name, param in self.named_parameters():
+                if 'cls_head' in name:
+                    param.requires_grad = True
+                else:
+                    param.requires_grad = False
 
     def tokenize(self, x, mask=None):
         x = x.permute(0, 2, 1) # [B, V, L]
