@@ -31,7 +31,7 @@ def train_one_epoch(model: nn.Module,
     optimizer.zero_grad()
     if log_writer is not None:
         print('log_dir: {}'.format(log_writer.log_dir))
-    for data_iter_step, (label, imu_input) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
+    for data_iter_step, (label, imu_input, _) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
         # we use a per iteration (instead of per epoch) lr scheduler
         if data_iter_step % accum_iter == 0:
             lr_sched.adjust_learning_rate(optimizer, data_iter_step / len(data_loader) + epoch, args)
@@ -108,7 +108,7 @@ def evaluate(model, data_loader, device, epoch, args=None, is_test=False):
 
     with torch.no_grad():
         for batch in metric_logger.log_every(data_loader, 10, header):
-            targets, images = batch
+            targets, images, _= batch
             images = images.to(device, non_blocking=True)
             targets = targets.to(device, non_blocking=True)
 

@@ -9,7 +9,8 @@ from plot import plot
 import argparse
 import pandas as pd
 
-from models.units import UniTS
+from models.units import UniTS, UniTSArgs
+from data.dataset import IMUDataset
 
 def get_args_parser():
     parser = argparse.ArgumentParser('inference', add_help=False)
@@ -27,7 +28,7 @@ def get_args_parser():
     return parser
 
 args = get_args_parser().parse_args()
-device = 'cpu'
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 load_path = args.load_path
 save_path = args.output_dir
@@ -166,58 +167,63 @@ def eval(eval_file):
     return acc, 
 
 def infer(config_path, model):
-    # mapping = {l: i for i, l in enumerate(labels)}
     ['downstairs', 'jog', 'lie', 'sit', 'stand', 'upstairs', 'walk']
     mapping = {
-        'downstairs': 0,
-        'jog': 1,
-        'lie': 2,
-        'sit': 3,
-        'stand': 4,
-        'upstairs': 5,
-        'walk': 6
+        0: 'downstairs',
+        1: 'jog',
+        2: 'lie',
+        3: 'sit',
+        4: 'stand',
+        5: 'upstairs',
+        6: 'walk'
     }
-
-    _mapping = {v: k for k, v in mapping.items()}
-
     acc_total = {}
     num_total = {}
-
     config = yaml.safe_load(open(config_path))['TEST']
     test_paths = config['META']
     loc = config.get('LOC', default_loc)
     for i, data_path in enumerate(test_paths):
         print(f"\t{i}. {data_path.split('/')[-1]}")
-        df = pd.read_json(data_path, orient='records')
-        data_item = df[df['location'].isin(loc)].to_dict('records')
-        print(f"{data_path}: len {len(data_item)}")
-
+        config = {
+            'META': [data_path],
+            'LOC': loc
+        }
+        dataset = IMUDataset(config, augment_round=0, is_train=False)
         predictions = []
         correct_pred = 0
         
+        # Create a DataLoader for batch processing
+        batch_size = 512  # You can adjust this based on your memory constraints
+        dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=False)
+        
         with torch.no_grad():
-            for data in tqdm(data_item, desc=f"Testing ..."):
-                imu_input = torch.tensor(data['imu_input'], dtype=torch.float32)
-                _label = data['output'].split(', ')[-1].strip()
-                label = mapping[_label] # an integer
+            for batch in tqdm(dataloader, desc="Testing ..."):
+                labels, imu_inputs, data_ids = batch
+                imu_inputs = imu_inputs.to(device, non_blocking=True)
+                labels = labels.to(device, non_blocking=True)
 
-                imu_input = imu_input.unsqueeze(0).to(device, non_blocking=True)
-                output = model(imu_input)
+                # Process the entire batch at once
+                outputs = model(imu_inputs)
+                _, pred_indices = torch.max(outputs, 1)
+                
+                # Update correct predictions count
+                correct_pred += (pred_indices == labels).sum().item()
+                
+                # Store predictions
+                for pred_idx, label, data_id in zip(pred_indices, labels, data_ids):
+                    predictions.append({
+                        'pred': mapping[pred_idx.item()],
+                        'ref': mapping[label.item()],
+                        'data_id': data_id.item()
+                    })
 
-                # Calculate accuracy
-                _, pred_index = torch.max(output, 1)
-                if pred_index.item() == label:
-                    correct_pred += 1
+            result_file = load_path.split('/')[-2] + '_' + data_path.split('/')[-1]
+            prediction_file = os.path.join(save_path, result_file)
+            json.dump(predictions, open(prediction_file, 'w'), indent=2)
 
-                predictions.append({'pred': _mapping[pred_index.item()], 'ref': _label, 'data_id': data['data_id']})
-
-        result_file = load_path.split('/')[-2] + '_' + data_path.split('/')[-1]
-        prediction_file = os.path.join(save_path, result_file)
-        json.dump(predictions, open(prediction_file, 'w'), indent=2)
-
-        print(f"{result_file} ", "Accuracy: {:.4f}%".format(correct_pred / len(data_item) * 100))
-        acc_total[result_file] = correct_pred / len(data_item)
-        num_total[result_file] = len(data_item)
+        print(f"{result_file} ", "Accuracy: {:.4f}%".format(correct_pred / len(dataset) * 100))
+        acc_total[result_file] = correct_pred / len(dataset)
+        num_total[result_file] = len(dataset)
 
         eval(prediction_file)
     print(json.dumps(acc_total, indent=2, sort_keys=True))
@@ -237,7 +243,9 @@ def infer(config_path, model):
 
 if __name__ == '__main__':
     # define the model
-    model = UniTS(enc_in=6, num_class=7)
+    args = json.load(open(os.path.join(load_path, 'args.json')))['model_args']
+    model_args = UniTSArgs.from_dict(args)
+    model = UniTS(enc_in=6, num_class=num_class, args=model_args, is_pretrain=False)
     if not load_path.endswith('.pth'):
         best_epoch = json.load(open(os.path.join(load_path, 'best.json')))['best_epoch']
         load_path = os.path.join(load_path, f'checkpoint-{best_epoch}.pth')

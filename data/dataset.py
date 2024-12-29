@@ -4,7 +4,6 @@ import numpy as np
 from typing import List, Dict
 
 import torch
-from pathlib import Path
 from torch.utils.data import Dataset
 from scipy.stats import special_ortho_group
 
@@ -12,7 +11,10 @@ class IMUDataset(Dataset):
     DEFAULT_LOC = ["chest", "upperarm", "wrist", "waist", "thigh"]
     def __init__(self, config, augment_round=1, is_train=True):
         data_list = []
-        config: Dict = yaml.safe_load(open(config))['TRAIN' if is_train else 'TEST']
+        if isinstance(config, str):
+            config: Dict = yaml.safe_load(open(config))['TRAIN' if is_train else 'TEST']
+        else:
+            config: Dict = config
         paths = config['META']
         loc: List[str] = config.get('LOC', self.DEFAULT_LOC)
         for meta_path in paths:
@@ -63,10 +65,11 @@ class IMUDataset(Dataset):
 
     def __getitem__(self, index):
         sample = self.data_list[index]
-        imu_data, caption = sample['imu_input'], sample['output']
+        imu_data, caption, data_id = sample['imu_input'], sample['output'], sample['data_id']
+
         imu_input = torch.tensor(imu_data, dtype=torch.float32)
         assert imu_input.shape[1] == 6, f"imu_input shape: {imu_input.shape}"
         caption = caption.split(', ')[-1].strip()
         label = torch.tensor([self.mapping[caption]], dtype=torch.int8)
-
-        return label, imu_input
+        
+        return label, imu_input, data_id

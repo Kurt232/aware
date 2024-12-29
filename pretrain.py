@@ -16,7 +16,7 @@ from torch.utils.tensorboard import SummaryWriter
 import util.lr_sched as lr_sched
 import util.misc as misc
 from data.dataset import IMUDataset
-from models.units import UniTS
+from models.units import UniTS, UniTSArgs
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
 from util.losses import UnifiedMaskRecLoss
 
@@ -75,6 +75,7 @@ def get_args_parser():
     
     # train setting
     parser.add_argument('--setting_id', default=0, type=int, help='training setting')
+    parser.add_argument('--phase', default='all', type=str, help='all, cls')
     return parser
 
 def train_one_epoch(model: nn.Module,
@@ -95,7 +96,7 @@ def train_one_epoch(model: nn.Module,
 
     optimizer.zero_grad()
 
-    for data_iter_step, (label, imu_input) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
+    for data_iter_step, (label, imu_input, _) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
         if data_iter_step % accum_iter == 0:
             lr_sched.adjust_learning_rate(optimizer, data_iter_step / len(data_loader) + epoch, args)
 
@@ -158,10 +159,11 @@ def main(args):
     cudnn.benchmark = True
 
     # Save args
+    model_args = UniTSArgs.from_args(args)
     log_args = {
         'time': datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
-        'model_args': '',
         'train_args': vars(args),
+        'model_args': vars(model_args),
     }
     os.makedirs(args.output_dir, exist_ok=True)
     with open(os.path.join(args.output_dir, "args.json"), mode="w", encoding="utf-8") as f:

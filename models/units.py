@@ -1,6 +1,7 @@
 """
 UniTS
 """
+from dataclasses import dataclass
 import math
 import torch
 import torch.nn.functional as F
@@ -834,7 +835,7 @@ class UniTS(nn.Module):
         else:
             return cls_dec_out
 
-    def forward(self, x_enc, x_mark_enc, enable_mask=None):
+    def forward(self, x_enc, x_mark_enc=None, enable_mask=None):
         if self.is_pretrain:
             dec_out = self.pretraining(x_enc, x_mark_enc,
                                        enable_mask=enable_mask)
@@ -842,3 +843,34 @@ class UniTS(nn.Module):
         else:
             dec_out = self.classification(x_enc, x_mark_enc)
             return dec_out  # [B, N]
+
+@dataclass
+class UniTSArgs:
+    d_model: int
+    n_heads: int
+    e_layers: int
+    patch_len: int
+    stride: int
+    dropout: float
+    prompt_num: int
+    phase: str
+    load_path: str = None
+    # pretrain
+    right_prob: float = None
+    min_mask_ratio: float = None
+    max_mask_ratio: float = None
+
+    def __post_init__(self):
+        self.phase = self.phase.lower()
+    
+    @classmethod
+    def from_args(cls, args):
+        # ignore args that are not in the dataclass
+        return cls(**{k: v for k, v in vars(args).items() if k in cls.__dataclass_fields__})
+    
+    @classmethod
+    def from_dict(cls, args):
+        return cls(**args)
+    
+    def to_dict(self):
+        return vars(self)

@@ -1,0 +1,22 @@
+NAME: 'multi thigh'
+TRAIN:
+    LOC:
+        - 'wrist'
+        - 'thigh'
+        - 'upperarm'
+        - 'waist'
+    META:
+        - '/data/wjdu/benchmark/data_4/50_2/realworld_90_TRAIN.json'
+        - '/data/wjdu/benchmark/data_4/50_2/domino_90_TRAIN.json'
+        - '/data/wjdu/benchmark/data_4/50_2/motion_10_TEST.json'
+
+TEST:
+    LOC:
+        - 'wrist'
+        - 'thigh'
+        - 'upperarm'
+        - 'waist'
+    META:
+        - '/data/wjdu/benchmark/data_4/50_2/shoaib_10_TEST.json' # same location
+        - '/data/wjdu/benchmark/data_4/50_2/hhar_10_TEST.json'
+        - '/data/wjdu/benchmark/data_4/50_2/pamap2_90_TRAIN.json'

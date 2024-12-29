@@ -1,6 +1,7 @@
 __pycache__/
 .history/
 output/
+output_pretrain/
 .vscode/
 
 *.npy

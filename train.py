@@ -17,7 +17,7 @@ from torch.utils.tensorboard import SummaryWriter
 import util.misc as misc
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
 
-from models.units import UniTS
+from models.units import UniTS, UniTSArgs
 from data.dataset import IMUDataset
 from engine import train_one_epoch, evaluate
 
@@ -33,8 +33,15 @@ def get_args_parser():
     # Model parameters
     parser.add_argument('--load_path', default=None, type=str,
                         help='path to load pretrained model')
-    parser.add_argument('--model_config', default=None, type=str,
-                        help='path to model config file')
+    parser.add_argument('--d_model', default=128, type=int)
+    parser.add_argument('--n_heads', default=8, type=int)
+    parser.add_argument('--e_layers', default=3, type=int)
+    parser.add_argument('--patch_len', default=8, type=int)
+    parser.add_argument('--stride', default=8, type=int)
+    parser.add_argument('--dropout', default=0.1, type=float)
+    parser.add_argument('--prompt_num', default=10, type=int)
+    parser.add_argument('--phase', default='all', type=str, help='all, cls')
+
     # Optimizer parameters
     parser.add_argument('--weight_decay', type=float, default=0.05,
                         help='weight decay (default: 0.05)')
@@ -80,7 +87,6 @@ def get_args_parser():
     
     # train setting
     parser.add_argument('--setting_id', default=0, type=int, help='training setting')
-    parser.add_argument('--phase', default='all', type=str, help='all, cls')
     return parser
 
 
@@ -109,16 +115,17 @@ def main(args):
     np.random.seed(seed)
     cudnn.benchmark = True
 
+    model_args = UniTSArgs.from_args(args)
     log_args = {
         'time': datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
-        'model_args': '',
         'train_args': vars(args),
+        'model_args': model_args.to_dict(),
     }
     with open(os.path.join(args.output_dir, "args.json"), mode="w", encoding="utf-8") as f:
         f.write(json.dumps(log_args, indent=4) + "\n")
 
     # Define the model
-    model = UniTS(enc_in=6, num_class=7, args=args, is_pretrain=False)
+    model = UniTS(enc_in=6, num_class=7, args=model_args, is_pretrain=False)
     load_path = args.load_path
     if load_path is not None and os.path.exists(load_path):
         print(f"Loading model from {load_path}")
