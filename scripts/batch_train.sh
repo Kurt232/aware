@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
 set -e  # Exit immediately if a command exits with a non-zero status
 
-GPUS="0,1,2,3"
+GPUS="0,1,2,3,4,5,6,7"
 
 ROOT="/data/wjdu/aware"
 MODEL="UniTS_HEAD"
-SETTING_ID=0
-MARK="_cls"
+SETTING_ID=1
+PHASE="all"
+MARK="_1_ft_1"
 
 MASTER_PORT=2233
 NNODE=$(($(echo $GPUS | tr -cd , | wc -c) + 1))
-CONFIGS="data/3datasets"
-LOAD_PATH="${ROOT}/pretrain/UniTS_HEAD_12291627/checkpoint-399.pth"
+CONFIGS="data/train"
+LOAD_PATH="${ROOT}/pretrain/UniTS_HEAD_1_12292347/checkpoint-399.pth"
 
 # Count total number of tasks
 TASK_LEN=$(ls $CONFIGS/*.yaml | wc -l)
@@ -39,13 +40,13 @@ for DATA_CONFIG in $CONFIGS/*.yaml; do
     echo "Output directory: $TRAIN_DIR"
 
     CUDA_VISIBLE_DEVICES="$GPUS" torchrun --nproc_per_node=$NNODE --master_port=$MASTER_PORT \
-        train.py --data_config "$DATA_CONFIG" --batch_size 1024 \
-        --epochs 10 --warmup_epochs 1 --blr 1e-4 --min_lr 1e-6 --weight_decay 5e-6 \
+        train.py --data_config "$DATA_CONFIG" --batch_size 512 \
+        --epochs 40 --warmup_epochs 10 --blr 1e-4 --min_lr 1e-6 --weight_decay 5e-6 \
         --load_path "$LOAD_PATH" \
         --output_dir "$TRAIN_DIR" \
         --seed 42 \
         --setting_id $SETTING_ID \
-        --phase cls \
+        --phase $PHASE \
         --d_model 256 \
         --n_heads 8 \
         --e_layers 3 \
@@ -55,8 +56,8 @@ for DATA_CONFIG in $CONFIGS/*.yaml; do
         --prompt_num 10 \
         > "$TRAIN_DIR"/output.log
     
-    mkdir -p "$OUTPUT_DIR"
+    # mkdir -p "$OUTPUT_DIR"
 
-    CUDA_VISIBLE_DEVICES="$GPUS" python infer.py -l "$TRAIN_DIR" -d "$DATA_CONFIG" -o "$OUTPUT_DIR" > "${OUTPUT_DIR}/output.log"
-    CUDA_VISIBLE_DEVICES="$GPUS" python eval.py "$OUTPUT_DIR" > "${OUTPUT_DIR}/output_still.log"
+    # CUDA_VISIBLE_DEVICES="$GPUS" python infer.py -l "$TRAIN_DIR" -d "$DATA_CONFIG" -o "$OUTPUT_DIR" > "${OUTPUT_DIR}/output.log"
+    # CUDA_VISIBLE_DEVICES="$GPUS" python eval.py "$OUTPUT_DIR" > "${OUTPUT_DIR}/output_still.log"
 done

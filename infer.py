@@ -189,6 +189,8 @@ def infer(config_path, model):
             'LOC': loc
         }
         dataset = IMUDataset(config, augment_round=0, is_train=False)
+        if len(dataset) == 0:
+            continue
         predictions = []
         correct_pred = 0
         
@@ -198,12 +200,13 @@ def infer(config_path, model):
         
         with torch.no_grad():
             for batch in tqdm(dataloader, desc="Testing ..."):
-                labels, imu_inputs, data_ids = batch
+                labels, imu_inputs, location_embs, data_ids = batch
                 imu_inputs = imu_inputs.to(device, non_blocking=True)
+                location_embs = location_embs.to(device, non_blocking=True)
                 labels = labels.to(device, non_blocking=True)
 
                 # Process the entire batch at once
-                outputs = model(imu_inputs)
+                outputs = model(imu_inputs, prior_emb=location_embs)
                 _, pred_indices = torch.max(outputs, 1)
                 
                 # Update correct predictions count

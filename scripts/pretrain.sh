@@ -12,7 +12,7 @@ TRAIN_DIR="${ROOT}/pretrain/${MODEL}${FLAG}_${TIMESTAMP}"
 
 mkdir -p "$TRAIN_DIR"
 
-GPUS="4,5,6,7"
+GPUS="0,1,2,3,4,5,6,7"
 MASTER_PORT=4233
 NNODE=$(($(echo $GPUS | tr -cd , | wc -c) + 1))
 

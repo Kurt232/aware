@@ -6,9 +6,10 @@ from typing import List, Dict
 import torch
 from torch.utils.data import Dataset
 from scipy.stats import special_ortho_group
+import clip
 
 class IMUDataset(Dataset):
-    DEFAULT_LOC = ["chest", "upperarm", "wrist", "waist", "thigh"]
+    DEFAULT_LOC = ["upperarm", "wrist", "waist", "thigh"]
     def __init__(self, config, augment_round=1, is_train=True):
         data_list = []
         if isinstance(config, str):
@@ -60,16 +61,31 @@ class IMUDataset(Dataset):
             'walk': 6
         }
 
+        # Load CLIP model
+        clip_model, _ = clip.load("ViT-B/32", device="cpu")
+
+        # Precompute location embeddings
+        self.location_embeddings = {}
+        with torch.no_grad():
+            for loc in self.DEFAULT_LOC:
+                text = clip.tokenize([loc])
+                self.location_embeddings[loc] = clip_model.encode_text(text)
+        
+        del clip_model
+
     def __len__(self):
         return len(self.data_list)
 
     def __getitem__(self, index):
         sample = self.data_list[index]
         imu_data, caption, data_id = sample['imu_input'], sample['output'], sample['data_id']
+        location = sample['location']
 
         imu_input = torch.tensor(imu_data, dtype=torch.float32)
         assert imu_input.shape[1] == 6, f"imu_input shape: {imu_input.shape}"
         caption = caption.split(', ')[-1].strip()
         label = torch.tensor([self.mapping[caption]], dtype=torch.int8)
         
-        return label, imu_input, data_id
+        location_embedding = self.location_embeddings[location]
+        
+        return label, imu_input, location_embedding, data_id

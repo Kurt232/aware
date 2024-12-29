@@ -333,7 +333,10 @@ def load_model(model_without_ddp, path):
 def all_reduce_mean(x):
     world_size = get_world_size()
     if world_size > 1:
-        x_reduce = torch.tensor(x).cuda()
+        if isinstance(x, torch.Tensor):
+            x_reduce = x.clone().detach().cuda()
+        else:
+            x_reduce = torch.tensor(x).cuda()
         dist.all_reduce(x_reduce)
         x_reduce /= world_size
         return x_reduce.item()

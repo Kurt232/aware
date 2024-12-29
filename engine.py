@@ -31,7 +31,7 @@ def train_one_epoch(model: nn.Module,
     optimizer.zero_grad()
     if log_writer is not None:
         print('log_dir: {}'.format(log_writer.log_dir))
-    for data_iter_step, (label, imu_input, _) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
+    for data_iter_step, (label, imu_input, location_emb, _) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
         # we use a per iteration (instead of per epoch) lr scheduler
         if data_iter_step % accum_iter == 0:
             lr_sched.adjust_learning_rate(optimizer, data_iter_step / len(data_loader) + epoch, args)
@@ -39,8 +39,9 @@ def train_one_epoch(model: nn.Module,
         criterion = torch.nn.CrossEntropyLoss()
         imu_input = imu_input.to(device, non_blocking=True)
         label = label.to(device, non_blocking=True)
+        location_emb = location_emb.to(device, non_blocking=True)
         with torch.cuda.amp.autocast():
-            output = model(imu_input)
+            output = model(imu_input, prior_emb=location_emb)
             c_loss = criterion(output, label.long().squeeze(-1))
 
         # Calculate accuracy
@@ -108,12 +109,13 @@ def evaluate(model, data_loader, device, epoch, args=None, is_test=False):
 
     with torch.no_grad():
         for batch in metric_logger.log_every(data_loader, 10, header):
-            targets, images, _= batch
+            targets, images, location_emb, _= batch
             images = images.to(device, non_blocking=True)
             targets = targets.to(device, non_blocking=True)
+            location_emb = location_emb.to(device, non_blocking=True)
 
             # Compute output
-            outputs = model(images)
+            outputs = model(images, prior_emb=location_emb)
             loss = criterion(outputs, targets.long().squeeze(-1))
 
             # Measure accuracy

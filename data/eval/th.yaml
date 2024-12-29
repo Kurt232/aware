@@ -1,17 +1,8 @@
-NAME: 'multi thigh'
-TRAIN:
-    LOC:
-        - 'thigh'
-    META:
-        - '/data/wjdu/benchmark/data_4/50_2/realworld_90_TRAIN.json'
-        - '/data/wjdu/benchmark/data_4/50_2/domino_90_TRAIN.json'
-        - '/data/wjdu/benchmark/data_4/50_2/motion_90_TRAIN.json'
-
+NAME: 'thigh'
 
 TEST:
     LOC:
         - 'wrist'
-        - 'thigh'
         - 'upperarm'
         - 'waist'
     META:

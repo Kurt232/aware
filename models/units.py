@@ -550,11 +550,11 @@ class CLSHead(nn.Module):
         cls_token = self.mlp(cls_token)
         if return_feature:
             return cls_token
-        m = category_token.shape[2]
+        m = category_token.shape[2] # num_class
         cls_token = cls_token.expand(B, V, m, C)
-        distance = torch.einsum('nvkc,nvmc->nvm', cls_token, category_token)
+        distance = torch.einsum('nvkc,nvmc->nvm', cls_token, category_token) # sum(dot_prod(kc, mc)) -> m, where k = m
 
-        distance = distance.mean(dim=1)
+        distance = distance.mean(dim=1) # [B, m]
         return distance
 
 
@@ -702,7 +702,7 @@ class UniTS(nn.Module):
     def classification(self, x):
         prefix_prompt = self.prompt_tokens
         task_prompt = self.cls_tokens
-        category_token = self.category_tokens.clone()  # Clone to avoid modifying original weights
+        category_token = self.category_tokens # need to update the weight
 
         x, n_vars, _ = self.tokenize(x) # [B, V, L, C]
 
@@ -712,6 +712,22 @@ class UniTS(nn.Module):
             x, n_vars, prefix_prompt, task_prompt)
 
         x = self.backbone(x, prefix_prompt.shape[2], seq_len)
+
+        if prior_emb is not None:
+            # prior_emb: [B, 1, 512]
+            # Project and gate prior knowledge
+            prior_proj = self.prior_proj(prior_emb)  # [B, D]
+            gate = self.prior_gate(prior_proj)  # [B, D]
+            
+            # Reshape and expand prior embeddings to match category token dimensions
+            prior_proj = prior_proj.unsqueeze(1)  # [B, 1, 1, D]
+            gate = gate.unsqueeze(1)  # [B, 1, 1, D]
+            
+            prior_proj = prior_proj.expand(-1, category_token.shape[1], category_token.shape[2], -1)  # [B, V, num_class, D]
+            gate = gate.expand(-1, category_token.shape[1], category_token.shape[2], -1)  # [B, V, num_class, D]
+            
+            # Gated combination of category tokens and prior knowledge
+            category_token = category_token * (1 - gate) + prior_proj * gate
 
         x = self.cls_head(x, category_token)
 
