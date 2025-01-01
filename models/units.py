@@ -658,7 +658,7 @@ class UniTS(nn.Module):
         self.cls_head = CLSHead(args.d_model, head_dropout=args.dropout)
         self.forecast_head = ForecastHead(
             args.d_model, args.patch_len, args.stride, args.stride, prefix_token_length=args.prompt_num, head_dropout=args.dropout)
-        if is_pretrain:
+        if is_pretrain: # deprecated
             self.pretrain_head = ForecastHead(
                 args.d_model, args.patch_len, args.stride, args.stride, prefix_token_length=1, head_dropout=args.dropout)
 
@@ -699,7 +699,7 @@ class UniTS(nn.Module):
                       seq_len, attn_mask=attn_mask)
         return x
 
-    def classification(self, x, x_mark):
+    def classification(self, x):
         prefix_prompt = self.prompt_tokens
         task_prompt = self.cls_tokens
         category_token = self.category_tokens.clone()  # Clone to avoid modifying original weights
@@ -783,7 +783,7 @@ class UniTS(nn.Module):
         mask_seq = mask_seq.squeeze(dim=-1).squeeze(dim=1)
         return mask_seq
 
-    def pretraining(self, x, x_mark, enable_mask=False):
+    def pretraining(self, x):
         prefix_prompt = self.prompt_tokens
         mask_token = self.mask_tokens
         cls_token = self.cls_tokens
@@ -798,50 +798,39 @@ class UniTS(nn.Module):
         # prepare prompts
         this_prompt = prefix_prompt.repeat(x.shape[0], 1, 1, 1)
 
-        if enable_mask:
-            mask = self.choose_masking(x, self.right_prob,
-                                       self.min_mask_ratio, self.max_mask_ratio)
-            mask_repeat = mask.unsqueeze(dim=1).unsqueeze(dim=-1)
-            mask_repeat = mask_repeat.repeat(1, x.shape[1], 1, x.shape[-1])
-            x = x * (1-mask_repeat) + mask_token * mask_repeat  # todo
+        # mask 
+        mask = self.choose_masking(x, self.right_prob,
+                                    self.min_mask_ratio, self.max_mask_ratio)
+        mask_repeat = mask.unsqueeze(dim=1).unsqueeze(dim=-1)
+        mask_repeat = mask_repeat.repeat(1, x.shape[1], 1, x.shape[-1])
+        x = x * (1-mask_repeat) + mask_token * mask_repeat  # todo
 
-            init_full_input = torch.cat((this_prompt, x), dim=-2)
-            init_mask_prompt = self.prompt2forecat(
-                init_full_input.transpose(-1, -2), x.shape[2]).transpose(-1, -2)
-            # keep the unmasked tokens and fill the masked ones with init_mask_prompt.
-            x = x * (1-mask_repeat) + init_mask_prompt * mask_repeat
-            x = x + self.position_embedding(x)
-            mask_seq = self.get_mask_seq(mask, seq_len+padding)
-            mask_seq = mask_seq[:, :seq_len]
+        init_full_input = torch.cat((this_prompt, x), dim=-2)
+        init_mask_prompt = self.prompt2forecat(
+            init_full_input.transpose(-1, -2), x.shape[2]).transpose(-1, -2)
+        # keep the unmasked tokens and fill the masked ones with init_mask_prompt.
+        x = x * (1-mask_repeat) + init_mask_prompt * mask_repeat
+        x = x + self.position_embedding(x)
+
+        mask_seq = self.get_mask_seq(mask, seq_len+padding)
+        mask_seq = mask_seq[:, :seq_len]
         this_function_prompt = cls_token.repeat(x.shape[0], 1, 1, 1)
         x = torch.cat((this_prompt, x, this_function_prompt), dim=2)
 
         x = self.backbone(x, prefix_prompt.shape[2], seq_token_len)
 
-        if enable_mask:
-            mask_dec_out = self.forecast_head(
-                x[:, :, :-1], seq_len+padding, seq_token_len)
-            mask_dec_out = mask_dec_out[:, :seq_len]
+        mask_dec_out = self.forecast_head(
+            x[:, :, :-1], seq_len+padding, seq_token_len)
+        mask_dec_out = mask_dec_out[:, :seq_len]
 
-            cls_dec_out = self.cls_head(x, return_feature=True)
-            # detach grad of the forecasting on tokens
-            fused_dec_out = torch.cat(
-                (cls_dec_out, x[:, :, self.prompt_num:-1].detach()), dim=2)
-            cls_dec_out = self.pretrain_head(
-                fused_dec_out, seq_len+padding, seq_token_len) # ?
-            cls_dec_out = cls_dec_out[:, :seq_len]
+        return mask_dec_out, mask_seq
 
-            return cls_dec_out, mask_dec_out, mask_seq
-        else:
-            return cls_dec_out
-
-    def forward(self, x_enc, x_mark_enc=None, enable_mask=None):
+    def forward(self, x_enc):
         if self.is_pretrain:
-            dec_out = self.pretraining(x_enc, x_mark_enc,
-                                       enable_mask=enable_mask)
-            return dec_out
+            dec_out, mask_seq = self.pretraining(x_enc)
+            return dec_out, mask_seq
         else:
-            dec_out = self.classification(x_enc, x_mark_enc)
+            dec_out = self.classification(x_enc)
             return dec_out  # [B, N]
 
 @dataclass

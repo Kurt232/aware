@@ -9,8 +9,9 @@ from typing import Iterable
 
 import numpy as np
 import torch
-import torch.backends.cudnn as cudnn
 import torch.nn as nn
+import torch.nn.functional as F
+import torch.backends.cudnn as cudnn
 from torch.utils.tensorboard import SummaryWriter
 
 import util.lr_sched as lr_sched
@@ -18,7 +19,6 @@ import util.misc as misc
 from data.dataset import IMUDataset
 from models.units import UniTS, UniTSArgs
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
-from util.losses import UnifiedMaskRecLoss
 
 def get_args_parser():
     parser = argparse.ArgumentParser('UniTS pretraining', add_help=False)
@@ -78,6 +78,24 @@ def get_args_parser():
     parser.add_argument('--phase', default='all', type=str, help='all, cls')
     return parser
 
+def calculate_reconstruction_loss(x_enc, mask_dec_out, mask_seq):
+    """
+    x_enc: Original input tensor [batch_size, seq_len, num_vars]
+    mask_dec_out: Model's predictions [batch_size, seq_len, num_vars]
+    mask_seq: Mask tensor indicating which positions were masked [batch_size, seq_len]
+    """
+    # Only calculate loss on masked positions
+    mask = mask_seq.unsqueeze(-1)  # [batch_size, seq_len, 1]
+    
+    # Calculate MSE loss only on masked positions
+    loss = F.mse_loss(mask_dec_out * mask, x_enc * mask, reduction='sum')
+    
+    # Normalize by the number of masked elements
+    num_masked = mask.sum()
+    loss = loss / num_masked if num_masked > 0 else loss
+    
+    return loss
+
 def train_one_epoch(model: nn.Module,
                     data_loader: Iterable, 
                     optimizer: torch.optim.Optimizer,
@@ -101,11 +119,9 @@ def train_one_epoch(model: nn.Module,
             lr_sched.adjust_learning_rate(optimizer, data_iter_step / len(data_loader) + epoch, args)
 
         imu_input = imu_input.to(device, non_blocking=True)
-        
         with torch.cuda.amp.autocast():
-            cls_out, mask_out, mask_seq = model(imu_input, None, enable_mask=True)
-            criterion = UnifiedMaskRecLoss().to(device)
-            loss = criterion(cls_out, mask_out, mask_seq, imu_input)
+            mask_out, mask_seq = model(imu_input)
+            loss = calculate_reconstruction_loss(imu_input, mask_out, mask_seq)
 
         loss_value = loss.item()
 
