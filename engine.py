@@ -39,7 +39,10 @@ def train_one_epoch(model: nn.Module,
         criterion = torch.nn.CrossEntropyLoss()
         imu_input = imu_input.to(device, non_blocking=True)
         label = label.to(device, non_blocking=True)
-        location_emb = location_emb.to(device, non_blocking=True)
+        if args.enable_aware:
+            location_emb = location_emb.to(device, non_blocking=True)
+        else:
+            location_emb = None
         with torch.cuda.amp.autocast():
             output = model(imu_input, prior_emb=location_emb)
             c_loss = criterion(output, label.long().squeeze(-1))
@@ -112,7 +115,10 @@ def evaluate(model, data_loader, device, epoch, args=None, is_test=False):
             targets, images, location_emb, _= batch
             images = images.to(device, non_blocking=True)
             targets = targets.to(device, non_blocking=True)
-            location_emb = location_emb.to(device, non_blocking=True)
+            if args.enable_aware:
+                location_emb = location_emb.to(device, non_blocking=True)
+            else:
+                location_emb = None
 
             # Compute output
             outputs = model(images, prior_emb=location_emb)

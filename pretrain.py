@@ -76,6 +76,8 @@ def get_args_parser():
     # train setting
     parser.add_argument('--setting_id', default=0, type=int, help='training setting')
     parser.add_argument('--phase', default='all', type=str, help='all, cls')
+    parser.add_argument('--enable_aware', action='store_true', help='enable aware layer')
+    parser.set_defaults(enable_aware=False)
     return parser
 
 def calculate_reconstruction_loss(x_enc, mask_dec_out, mask_seq):
@@ -114,13 +116,18 @@ def train_one_epoch(model: nn.Module,
 
     optimizer.zero_grad()
 
-    for data_iter_step, (label, imu_input, _, _) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
+    for data_iter_step, (label, imu_input, location_emb, _) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
         if data_iter_step % accum_iter == 0:
             lr_sched.adjust_learning_rate(optimizer, data_iter_step / len(data_loader) + epoch, args)
 
         imu_input = imu_input.to(device, non_blocking=True)
+        if args.enable_aware:
+            location_emb = location_emb.to(device, non_blocking=True)
+        else:
+            location_emb = None
+        
         with torch.cuda.amp.autocast():
-            mask_out, mask_seq = model(imu_input)
+            mask_out, mask_seq = model(imu_input, prior_emb=location_emb)
             loss = calculate_reconstruction_loss(imu_input, mask_out, mask_seq)
 
         loss_value = loss.item()

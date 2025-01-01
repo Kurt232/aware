@@ -87,6 +87,8 @@ def get_args_parser():
     
     # train setting
     parser.add_argument('--setting_id', default=0, type=int, help='training setting')
+    parser.add_argument('--enable_aware', action='store_true', help='enable aware layer')
+    parser.set_defaults(enable_aware=False)
     return parser
 
 
