@@ -596,6 +596,32 @@ class ForecastHead(nn.Module):
         x = x.permute(0, 2, 1)
         return x
 
+
+class AwareLayer(nn.Module):
+    def __init__(self, clip_dim, d_model):
+        super().__init__()
+        self.att = CrossAttention(d_model)
+        self.prior_mlp = nn.Sequential(
+            Mlp(in_features=clip_dim, hidden_features=d_model, act_layer=nn.GELU),
+            Mlp(in_features=d_model, hidden_features=d_model, act_layer=nn.GELU),
+        )
+        self.norm = nn.LayerNorm(d_model)
+
+    def forward(self, x, prior_emb):
+        # Project prior embedding
+        emb = self.prior_mlp(prior_emb)  # [B, 1, D]
+        
+        # Reshape inputs for cross-attention
+        B, V, L, D = x.shape
+        x = x.view(B*V, L, D)  # [B*V, L, D]
+        emb = emb.unsqueeze(1).expand(B, V, 1, D).reshape(B*V, 1, D)  # [B*V, 1, D]
+        
+        # Apply cross-attention and normalization
+        x = self.att(x, query=emb)
+        x = x.view(B, V, L, D)
+        return self.norm(x)
+
+
 class UniTS(nn.Module):
     """
     UniTS: Building a Unified Time Series Model
@@ -662,6 +688,10 @@ class UniTS(nn.Module):
             self.pretrain_head = ForecastHead(
                 args.d_model, args.patch_len, args.stride, args.stride, prefix_token_length=1, head_dropout=args.dropout)
 
+        # Prior knowledge projection
+        clip_dim = 512
+        self.prior_aware = AwareLayer(clip_dim, args.d_model)
+        
         if self.phase == 'cls':
             for name, param in self.named_parameters():
                 if 'cls_head' in name:
@@ -702,7 +732,7 @@ class UniTS(nn.Module):
     def classification(self, x):
         prefix_prompt = self.prompt_tokens
         task_prompt = self.cls_tokens
-        category_token = self.category_tokens # need to update the weight
+        category_token = self.category_tokens
 
         x, n_vars, _ = self.tokenize(x) # [B, V, L, C]
 
@@ -712,23 +742,9 @@ class UniTS(nn.Module):
             x, n_vars, prefix_prompt, task_prompt)
 
         x = self.backbone(x, prefix_prompt.shape[2], seq_len)
-
-        if prior_emb is not None:
-            # prior_emb: [B, 1, 512]
-            # Project and gate prior knowledge
-            prior_proj = self.prior_proj(prior_emb)  # [B, D]
-            gate = self.prior_gate(prior_proj)  # [B, D]
+        if prior_emb:
+            x = self.prior_aware(x, prior_emb)
             
-            # Reshape and expand prior embeddings to match category token dimensions
-            prior_proj = prior_proj.unsqueeze(1)  # [B, 1, 1, D]
-            gate = gate.unsqueeze(1)  # [B, 1, 1, D]
-            
-            prior_proj = prior_proj.expand(-1, category_token.shape[1], category_token.shape[2], -1)  # [B, V, num_class, D]
-            gate = gate.expand(-1, category_token.shape[1], category_token.shape[2], -1)  # [B, V, num_class, D]
-            
-            # Gated combination of category tokens and prior knowledge
-            category_token = category_token * (1 - gate) + prior_proj * gate
-
         x = self.cls_head(x, category_token)
 
         return x
@@ -799,7 +815,7 @@ class UniTS(nn.Module):
         mask_seq = mask_seq.squeeze(dim=-1).squeeze(dim=1)
         return mask_seq
 
-    def pretraining(self, x):
+    def pretraining(self, x, prior_emb=None):
         prefix_prompt = self.prompt_tokens
         mask_token = self.mask_tokens
         cls_token = self.cls_tokens
@@ -835,6 +851,9 @@ class UniTS(nn.Module):
 
         x = self.backbone(x, prefix_prompt.shape[2], seq_token_len)
 
+        if prior_emb:
+            x = self.prior_aware(x, prior_emb)
+        
         mask_dec_out = self.forecast_head(
             x[:, :, :-1], seq_len+padding, seq_token_len)
         mask_dec_out = mask_dec_out[:, :seq_len]
