@@ -129,7 +129,7 @@ def main(args):
     load_path = args.load_path
     if load_path is not None and os.path.exists(load_path):
         print(f"Loading model from {load_path}")
-        pretrained_mdl = torch.load(load_path, map_location='cpu')
+        pretrained_mdl = torch.load(load_path, map_location='cpu')['model']
         msg = model.load_state_dict(pretrained_mdl, strict=False)
         print(msg)
     model.to(device)  # device is cuda
