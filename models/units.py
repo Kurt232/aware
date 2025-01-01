@@ -598,12 +598,12 @@ class ForecastHead(nn.Module):
 
 
 class AwareLayer(nn.Module):
-    def __init__(self, clip_dim, d_model):
+    def __init__(self, clip_dim, d_model, n_head, mlp_ratio=4, dropout=0):
         super().__init__()
-        self.att = CrossAttention(d_model)
+        self.att = SeqAttention(d_model, n_head, proj_drop=dropout)
         self.prior_mlp = nn.Sequential(
-            Mlp(in_features=clip_dim, hidden_features=d_model, act_layer=nn.GELU),
-            Mlp(in_features=d_model, hidden_features=d_model, act_layer=nn.GELU),
+            Mlp(in_features=clip_dim, out_features=d_model, hidden_features=int(d_model*mlp_ratio), act_layer=nn.GELU, drop=dropout),
+            Mlp(in_features=d_model, out_features=d_model, hidden_features=int(d_model*mlp_ratio), act_layer=nn.GELU, drop=dropout),
         )
         self.norm = nn.LayerNorm(d_model)
 
@@ -611,13 +611,19 @@ class AwareLayer(nn.Module):
         # Project prior embedding
         emb = self.prior_mlp(prior_emb)  # [B, 1, D]
         
-        # Reshape inputs for cross-attention
+        # Reshape inputs
         B, V, L, D = x.shape
         x = x.view(B*V, L, D)  # [B*V, L, D]
-        emb = emb.unsqueeze(1).expand(B, V, 1, D).reshape(B*V, 1, D)  # [B*V, 1, D]
         
-        # Apply cross-attention and normalization
-        x = self.att(x, query=emb)
+        # Expand and append prior embedding to sequence
+        emb = emb.unsqueeze(1).expand(B, V, 1, D).reshape(B*V, 1, D)  # [B*V, 1, D]
+        x_with_emb = torch.cat([x, emb], dim=1)  # [B*V, L+1, D]
+        
+        # Apply self-attention
+        x_out = self.att(x_with_emb)  # [B*V, L+1, D]
+        
+        # Split back to original sequence and prior embedding
+        x = x_out[:, :-1]  # [B*V, L, D]
         x = x.view(B, V, L, D)
         return self.norm(x)
 
@@ -690,7 +696,7 @@ class UniTS(nn.Module):
 
         # Prior knowledge projection
         clip_dim = 512
-        self.prior_aware = AwareLayer(clip_dim, args.d_model)
+        self.prior_aware = AwareLayer(clip_dim, args.d_model, args.n_heads, dropout=args.dropout)
         
         if self.phase == 'cls':
             for name, param in self.named_parameters():
@@ -729,7 +735,7 @@ class UniTS(nn.Module):
                       seq_len, attn_mask=attn_mask)
         return x
 
-    def classification(self, x):
+    def classification(self, x, prior_emb=None):
         prefix_prompt = self.prompt_tokens
         task_prompt = self.cls_tokens
         category_token = self.category_tokens
@@ -742,7 +748,7 @@ class UniTS(nn.Module):
             x, n_vars, prefix_prompt, task_prompt)
 
         x = self.backbone(x, prefix_prompt.shape[2], seq_len)
-        if prior_emb:
+        if prior_emb is not None:
             x = self.prior_aware(x, prior_emb)
             
         x = self.cls_head(x, category_token)
@@ -851,7 +857,7 @@ class UniTS(nn.Module):
 
         x = self.backbone(x, prefix_prompt.shape[2], seq_token_len)
 
-        if prior_emb:
+        if prior_emb is not None:
             x = self.prior_aware(x, prior_emb)
         
         mask_dec_out = self.forecast_head(
@@ -860,12 +866,12 @@ class UniTS(nn.Module):
 
         return mask_dec_out, mask_seq
 
-    def forward(self, x_enc):
+    def forward(self, x_enc, prior_emb=None):
         if self.is_pretrain:
-            dec_out, mask_seq = self.pretraining(x_enc)
+            dec_out, mask_seq = self.pretraining(x_enc, prior_emb)
             return dec_out, mask_seq
         else:
-            dec_out = self.classification(x_enc)
+            dec_out = self.classification(x_enc, prior_emb)
             return dec_out  # [B, N]
 
 @dataclass
