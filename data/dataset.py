@@ -24,8 +24,6 @@ class IMUDataset(Dataset):
             print(f"{meta_path}: len {len(meta_l)}")
             data_list += meta_l
 
-        data_list += meta_l
-
         self.sensor_dimen = 3
         if is_train and augment_round > 0:
             _data_list = []

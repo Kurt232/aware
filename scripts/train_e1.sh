@@ -4,10 +4,10 @@ set -e  # Exit immediately if a command exits with a non-zero status
 GPUS="0,1,2,3,4,5,6,7"
 
 ROOT="/data/wjdu/aware"
-MODEL="w_aware_lr"
+MODEL="wo_aware"
 SETTING_ID=1
 PHASE="all"
-MARK="_1"
+MARK=""
 
 MASTER_PORT=2233
 NNODE=$(($(echo $GPUS | tr -cd , | wc -c) + 1))
@@ -16,7 +16,7 @@ CONFIGS="data/train"
 
 DATA_CONFIG="data/train/s_all.yaml"
 FLAG=$(basename ${DATA_CONFIG%.yaml})
-TRAIN_DIR="${ROOT}/output/${MODEL}${MARK}/${MODEL}_${FLAG}"
+TRAIN_DIR="${ROOT}/output_e1/${MODEL}${MARK}/${MODEL}_${FLAG}"
 OUTPUT_DIR="${ROOT}/result/${MODEL}${MARK}/${MODEL}_${FLAG}"
 
 # if exists TRAIN_DIR, skip
@@ -50,8 +50,8 @@ CUDA_VISIBLE_DEVICES="$GPUS" torchrun --nproc_per_node=$NNODE --master_port=$MAS
     --prompt_num 10 \
     > "$TRAIN_DIR"/output.log
 
-DATA_CONFIG="data/eval/all.yaml"
-mkdir -p "$OUTPUT_DIR"
+# DATA_CONFIG="data/eval/all.yaml"
+# mkdir -p "$OUTPUT_DIR"
 
-CUDA_VISIBLE_DEVICES="$GPUS" python infer.py -l "$TRAIN_DIR" -d "$DATA_CONFIG" -o "$OUTPUT_DIR" > "${OUTPUT_DIR}/output.log"
-CUDA_VISIBLE_DEVICES="$GPUS" python eval.py "$OUTPUT_DIR" > "${OUTPUT_DIR}/output_still.log"
+# CUDA_VISIBLE_DEVICES="$GPUS" python infer.py -l "$TRAIN_DIR" -d "$DATA_CONFIG" -o "$OUTPUT_DIR" > "${OUTPUT_DIR}/output.log"
+# CUDA_VISIBLE_DEVICES="$GPUS" python eval.py "$OUTPUT_DIR" > "${OUTPUT_DIR}/output_still.log"

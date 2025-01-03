@@ -24,7 +24,8 @@ def get_args_parser():
 
     parser.add_argument('-o', '--output_dir', default=None,
                         help='path where to save, empty for no saving')
-
+    parser.add_argument('--enable_aware', action='store_true', help='enable aware layer')
+    parser.set_defaults(enable_aware=False)
     return parser
 
 args = get_args_parser().parse_args()
@@ -32,6 +33,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 load_path = args.load_path
 save_path = args.output_dir
+enable_aware = args.enable_aware
 
 num_class = 7
 config_paths = args.data_config
@@ -202,8 +204,11 @@ def infer(config_path, model):
             for batch in tqdm(dataloader, desc="Testing ..."):
                 labels, imu_inputs, location_embs, data_ids = batch
                 imu_inputs = imu_inputs.to(device, non_blocking=True)
-                location_embs = location_embs.to(device, non_blocking=True)
                 labels = labels.to(device, non_blocking=True)
+                if enable_aware:
+                    location_embs = location_embs.to(device, non_blocking=True)
+                else:
+                    location_embs = None
 
                 # Process the entire batch at once
                 outputs = model(imu_inputs, prior_emb=location_embs)
@@ -246,8 +251,8 @@ def infer(config_path, model):
 
 if __name__ == '__main__':
     # define the model
-    args = json.load(open(os.path.join(load_path, 'args.json')))['model_args']
-    model_args = UniTSArgs.from_dict(args)
+    model_args = json.load(open(os.path.join(load_path, 'args.json')))['model_args']
+    model_args = UniTSArgs.from_dict(model_args)
     model = UniTS(enc_in=6, num_class=num_class, args=model_args, is_pretrain=False)
     if not load_path.endswith('.pth'):
         best_epoch = json.load(open(os.path.join(load_path, 'best.json')))['best_epoch']
