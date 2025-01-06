@@ -549,7 +549,7 @@ class CLSHead(nn.Module):
 
         cls_token = self.mlp(cls_token)
         if return_feature:
-            return cls_token
+            return cls_token # [B, V, 1, C]
         m = category_token.shape[2] # num_class
         cls_token = cls_token.expand(B, V, m, C)
         distance = torch.einsum('nvkc,nvmc->nvm', cls_token, category_token) # sum(dot_prod(kc, mc)) -> m, where k = m
@@ -720,10 +720,6 @@ class UniTS(nn.Module):
         # Prior knowledge injection
         d_clip = 512
         self.prior_aware = AwareLayer(d_clip, args.d_model, args.n_heads, dropout=args.dropout)
-        self.prior_aware_1 = AwareLayer(d_clip, args.d_model, args.n_heads, dropout=args.dropout)
-
-        self.forecast_head_1 = ForecastHead(
-            args.d_model, args.patch_len, args.stride, args.stride, prefix_token_length=args.prompt_num, head_dropout=args.dropout)
         
         if self.phase == 'cls':
             for name, param in self.named_parameters():
@@ -884,57 +880,48 @@ class UniTS(nn.Module):
 
         return mask_dec_out, mask_seq
 
-    def aware(self, x, prior_x, prior_y):
+    def aware(self, x, prior_x, y, prior_y):
+        # contrastive learning
+        # aim to reduce the gap between x and y
         prefix_prompt = self.prompt_tokens
-        mask_token = self.mask_tokens
+        task_prompt = self.cls_tokens
 
-        seq_len = x.shape[1]
-        x, n_vars, padding = self.tokenize(x)
-        seq_token_len = x.shape[-2]
+        x, n_vars, _ = self.tokenize(x) # [B, V, L, C]
 
-        # append prompt tokens
-        x = torch.reshape(
-            x, (-1, n_vars, x.shape[-2], x.shape[-1]))
-        # prepare prompts
-        this_prompt = prefix_prompt.repeat(x.shape[0], 1, 1, 1)
+        seq_len = x.shape[-2]
 
-        # mask 
-        mask = self.random_masking(x, self.min_mask_ratio, self.max_mask_ratio)
-        mask_repeat = mask.unsqueeze(dim=1).unsqueeze(dim=-1)
-        mask_repeat = mask_repeat.repeat(1, x.shape[1], 1, x.shape[-1])
-        x = x * (1-mask_repeat) + mask_token * mask_repeat  # todo
+        x = self.prepare_prompt(
+            x, n_vars, prefix_prompt, task_prompt)
 
-        init_full_input = torch.cat((this_prompt, x), dim=-2)
-        init_mask_prompt = self.prompt2forecat(
-            init_full_input.transpose(-1, -2), x.shape[2]).transpose(-1, -2)
-        # keep the unmasked tokens and fill the masked ones with init_mask_prompt.
-        x = x * (1-mask_repeat) + init_mask_prompt * mask_repeat
-        x = x + self.position_embedding(x)
-
-        mask_seq = self.get_mask_seq(mask, seq_len+padding)
-        mask_seq = mask_seq[:, :seq_len]
-        x = torch.cat((this_prompt, x), dim=2)
-
-        x = self.backbone(x, prefix_prompt.shape[2], seq_token_len)
-
-        x = self.prior_aware(x, prior_x)
-
-        x = self.prior_aware_1(x, prior_y)
-        mask_dec_out = self.forecast_head_1(
-            x[:, :, :-1], seq_len+padding, seq_token_len)
-        mask_dec_out = mask_dec_out[:, :seq_len]
-
-        return mask_dec_out, mask_seq
+        x = self.backbone(x, prefix_prompt.shape[2], seq_len)
+        x = self.prior_aware(x, prior_x) # [B, V, L, C]
         
-    def forward(self, x_enc, prior_emb=None, prior_y=None):
+        x = self.cls_head(x, return_feature=True) # [B, V, 1, C]
+        x = x.mean(dim=1).squeeze(dim=1) # [B, C]
+
+        y, n_vars, _ = self.tokenize(y)
+        seq_len = y.shape[-2]
+
+        y = self.prepare_prompt(
+            y, n_vars, prefix_prompt, task_prompt)
+
+        y = self.backbone(y, prefix_prompt.shape[2], seq_len)
+        y = self.prior_aware(y, prior_y) # [B, V, L, C]
+
+        y = self.cls_head(y, return_feature=True) # [B, V, 1, C]
+        y = y.mean(dim=1).squeeze(dim=1) # [B, C]
+
+        return x, y
+        
+    def forward(self, x, prior_emb=None, y=None, prior_y=None):
         if self.task == 'pretrain':
-            dec_out, mask_seq = self.pretraining(x_enc, prior_emb)
+            dec_out, mask_seq = self.pretraining(x, prior_emb)
             return dec_out, mask_seq
         elif self.task == 'aware':
-            dec_out, mask_seq = self.aware(x_enc, prior_emb, prior_y)
-            return dec_out, mask_seq
+            x, y = self.aware(x, prior_emb, y, prior_y)
+            return x, y
         else:
-            dec_out = self.classification(x_enc, prior_emb)
+            dec_out = self.classification(x, prior_emb)
             return dec_out  # [B, N]
 
 @dataclass

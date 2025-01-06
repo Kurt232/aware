@@ -26,23 +26,23 @@ if [ -f "$LOAD_PATH" ]; then
     echo "Fine-tuning"
 fi
 
-# CUDA_VISIBLE_DEVICES="$GPUS" torchrun --nproc_per_node=$NNODE --master_port=$MASTER_PORT \
-#     train.py --data_config "$DATA_CONFIG" --batch_size 512 \
-#     --epochs 40 --warmup_epochs 10 --blr 1e-4 --min_lr 1e-6 --weight_decay 5e-6 \
-#     --load_path "$LOAD_PATH" \
-#     --output_dir "$TRAIN_DIR" \
-#     --seed 42 \
-#     --setting_id $SETTING_ID \
-#     --enable_aware \
-#     --phase $PHASE \
-#     --d_model 256 \
-#     --n_heads 8 \
-#     --e_layers 3 \
-#     --patch_len 8 \
-#     --stride 8 \
-#     --dropout 0.1 \
-#     --prompt_num 10 \
-#     > "$TRAIN_DIR"/output.log
+CUDA_VISIBLE_DEVICES="$GPUS" torchrun --nproc_per_node=$NNODE --master_port=$MASTER_PORT \
+    train.py --data_config "$DATA_CONFIG" --batch_size 512 \
+    --epochs 40 --warmup_epochs 10 --blr 1e-4 --min_lr 1e-6 --weight_decay 5e-6 \
+    --load_path "$LOAD_PATH" \
+    --output_dir "$TRAIN_DIR" \
+    --seed 42 \
+    --setting_id $SETTING_ID \
+    --enable_aware \
+    --phase $PHASE \
+    --d_model 256 \
+    --n_heads 8 \
+    --e_layers 3 \
+    --patch_len 8 \
+    --stride 8 \
+    --dropout 0.1 \
+    --prompt_num 10 \
+    > "$TRAIN_DIR"/output.log
 
 # OUTPUT_DIR="${ROOT}/result/sup_90/${MODEL}${MARK}"
 # mkdir -p "$OUTPUT_DIR"
