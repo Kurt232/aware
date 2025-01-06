@@ -667,19 +667,20 @@ class UniTS(nn.Module):
     def __init__(self, 
                  enc_in, num_class,
                  args,
-                 is_pretrain=False,
+                 task='cls',
                 ):
         super().__init__()
 
-        if is_pretrain:
+        self.task = task
+        if task == 'pretrain' or task == 'aware':
             self.right_prob = args.right_prob
             self.min_mask_ratio = args.min_mask_ratio
             self.max_mask_ratio = args.max_mask_ratio
             self.phase = 'all'
-        else:
+        elif task == 'cls':
             self.phase = args.phase
-        
-        self.is_pretrain = is_pretrain
+        else:
+            raise ValueError(f"Invalid task: {task}, should be 'pretrain', 'aware', or 'cls'")
 
         # Tokens settings
         self.prompt_tokens = nn.Parameter(torch.zeros(1, enc_in, args.prompt_num, args.d_model))
@@ -716,13 +717,14 @@ class UniTS(nn.Module):
         self.cls_head = CLSHead(args.d_model, head_dropout=args.dropout)
         self.forecast_head = ForecastHead(
             args.d_model, args.patch_len, args.stride, args.stride, prefix_token_length=args.prompt_num, head_dropout=args.dropout)
-        if is_pretrain: # deprecated
-            self.pretrain_head = ForecastHead(
-                args.d_model, args.patch_len, args.stride, args.stride, prefix_token_length=1, head_dropout=args.dropout)
 
         # Prior knowledge injection
         d_clip = 512
         self.prior_aware = AwareLayer(d_clip, args.d_model, args.n_heads, dropout=args.dropout)
+        self.prior_aware_1 = AwareLayer(d_clip, args.d_model, args.n_heads, dropout=args.dropout)
+
+        self.forecast_head_1 = ForecastHead(
+            args.d_model, args.patch_len, args.stride, args.stride, prefix_token_length=args.prompt_num, head_dropout=args.dropout)
         
         if self.phase == 'cls':
             for name, param in self.named_parameters():
@@ -878,8 +880,7 @@ class UniTS(nn.Module):
 
         mask_seq = self.get_mask_seq(mask, seq_len+padding)
         mask_seq = mask_seq[:, :seq_len]
-        this_function_prompt = cls_token.repeat(x.shape[0], 1, 1, 1)
-        x = torch.cat((this_prompt, x, this_function_prompt), dim=2)
+        x = torch.cat((this_prompt, x), dim=2)
 
         x = self.backbone(x, prefix_prompt.shape[2], seq_token_len)
 
@@ -892,9 +893,55 @@ class UniTS(nn.Module):
 
         return mask_dec_out, mask_seq
 
-    def forward(self, x_enc, prior_emb=None):
-        if self.is_pretrain:
+    def aware(self, x, prior_x, prior_y):
+        prefix_prompt = self.prompt_tokens
+        mask_token = self.mask_tokens
+
+        seq_len = x.shape[1]
+        x, n_vars, padding = self.tokenize(x)
+        seq_token_len = x.shape[-2]
+
+        # append prompt tokens
+        x = torch.reshape(
+            x, (-1, n_vars, x.shape[-2], x.shape[-1]))
+        # prepare prompts
+        this_prompt = prefix_prompt.repeat(x.shape[0], 1, 1, 1)
+
+        # mask 
+        mask = self.choose_masking(x, self.right_prob,
+                                    self.min_mask_ratio, self.max_mask_ratio)
+        mask_repeat = mask.unsqueeze(dim=1).unsqueeze(dim=-1)
+        mask_repeat = mask_repeat.repeat(1, x.shape[1], 1, x.shape[-1])
+        x = x * (1-mask_repeat) + mask_token * mask_repeat  # todo
+
+        init_full_input = torch.cat((this_prompt, x), dim=-2)
+        init_mask_prompt = self.prompt2forecat(
+            init_full_input.transpose(-1, -2), x.shape[2]).transpose(-1, -2)
+        # keep the unmasked tokens and fill the masked ones with init_mask_prompt.
+        x = x * (1-mask_repeat) + init_mask_prompt * mask_repeat
+        x = x + self.position_embedding(x)
+
+        mask_seq = self.get_mask_seq(mask, seq_len+padding)
+        mask_seq = mask_seq[:, :seq_len]
+        x = torch.cat((this_prompt, x), dim=2)
+
+        x = self.backbone(x, prefix_prompt.shape[2], seq_token_len)
+
+        x = self.prior_aware(x, prior_x)
+
+        x = self.prior_aware_1(x, prior_y)
+        mask_dec_out = self.forecast_head_1(
+            x[:, :, :-1], seq_len+padding, seq_token_len)
+        mask_dec_out = mask_dec_out[:, :seq_len]
+
+        return mask_dec_out, mask_seq
+        
+    def forward(self, x_enc, prior_emb=None, prior_y=None):
+        if self.task == 'pretrain':
             dec_out, mask_seq = self.pretraining(x_enc, prior_emb)
+            return dec_out, mask_seq
+        elif self.task == 'aware':
+            dec_out, mask_seq = self.aware(x_enc, prior_emb, prior_y)
             return dec_out, mask_seq
         else:
             dec_out = self.classification(x_enc, prior_emb)

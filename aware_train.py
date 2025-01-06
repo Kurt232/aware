@@ -16,12 +16,12 @@ from torch.utils.tensorboard import SummaryWriter
 
 import util.lr_sched as lr_sched
 import util.misc as misc
-from data.dataset import IMUDataset
+from data.dataset import IMUSyncDataset
 from models.units import UniTS, UniTSArgs
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
 
 def get_args_parser():
-    parser = argparse.ArgumentParser('UniTS pretraining', add_help=False)
+    parser = argparse.ArgumentParser('UniTS awaretraining', add_help=False)
     parser.add_argument('--batch_size', default=64, type=int,
                         help='Batch size per GPU (effective batch size is batch_size * accum_iter * # gpus')
     parser.add_argument('--epochs', default=400, type=int)
@@ -76,6 +76,7 @@ def get_args_parser():
     # train setting
     parser.add_argument('--setting_id', default=0, type=int, help='training setting')
     parser.add_argument('--phase', default='all', type=str, help='all, cls')
+    # deprecated, always enable aware layer
     parser.add_argument('--enable_aware', action='store_true', help='enable aware layer')
     parser.set_defaults(enable_aware=False)
     return parser
@@ -116,19 +117,18 @@ def train_one_epoch(model: nn.Module,
 
     optimizer.zero_grad()
 
-    for data_iter_step, (label, imu_input, location_emb, _) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
+    for data_iter_step, (_, imu_input, location_emb, _, sync_input, sync_location_emb) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
         if data_iter_step % accum_iter == 0:
             lr_sched.adjust_learning_rate(optimizer, data_iter_step / len(data_loader) + epoch, args)
 
         imu_input = imu_input.to(device, non_blocking=True)
-        if args.enable_aware:
-            location_emb = location_emb.to(device, non_blocking=True)
-        else:
-            location_emb = None
+        sync_input = sync_input.to(device, non_blocking=True)
+        location_emb = location_emb.to(device, non_blocking=True)
+        sync_location_emb = sync_location_emb.to(device, non_blocking=True)
         
         with torch.cuda.amp.autocast():
-            mask_out, mask_seq = model(imu_input, prior_emb=location_emb)
-            loss = calculate_reconstruction_loss(imu_input, mask_out, mask_seq)
+            mask_out, mask_seq = model(imu_input, prior_emb=location_emb, prior_y=sync_location_emb)
+            loss = calculate_reconstruction_loss(sync_input, mask_out, mask_seq)
 
         loss_value = loss.item()
 
@@ -159,7 +159,17 @@ def train_one_epoch(model: nn.Module,
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 def main(args):
-    misc.init_distributed_mode(args)    
+    misc.init_distributed_mode(args)
+
+    if args.setting_id == 1:
+        augment_round = 1
+    elif args.setting_id == 2:
+        augment_round = 2
+    elif args.setting_id == 3:
+        augment_round = 5
+    else:
+        augment_round = 0
+    
     print('job dir: {}'.format(os.path.dirname(os.path.realpath(__file__))))
     print("{}".format(args).replace(', ', ',\n'))
 
@@ -183,7 +193,7 @@ def main(args):
         f.write(json.dumps(log_args, indent=4) + "\n")
 
     # Create dataset
-    dataset_train = IMUDataset(args.data_config, is_train=True, is_rotated=args.setting_id == 1)
+    dataset_train = IMUSyncDataset(args.data_config, augment_round=augment_round, is_train=True)
     print(f"train dataset size: {len(dataset_train)}")
 
     # Split into train and validation sets
@@ -206,12 +216,7 @@ def main(args):
     sampler_val = torch.utils.data.DistributedSampler(
         dataset_val, num_replicas=num_tasks, rank=global_rank, shuffle=False
     )
-    
-    if len(dataset_train) < args.batch_size * num_tasks:
-        print(f"Warning: Training dataset size ({len(dataset_train)}) is smaller than batch size ({args.batch_size}), and will be set to the dataset size")
-        args.batch_size = len(dataset_train) // num_tasks
-    if len(dataset_val) < args.batch_size * num_tasks:
-        print(f"Warning: Validation dataset size ({len(dataset_val)}) is smaller than batch size ({args.batch_size})")
+
     # Create data loaders
     data_loader_train = torch.utils.data.DataLoader(
         dataset_train, 
@@ -236,7 +241,7 @@ def main(args):
         enc_in=6,  # 6 channels for IMU data (3 acc + 3 gyro)
         num_class=7,  # Number of activity classes
         args=args,
-        task='pretrain'
+        task='aware'
     )
     model.to(device)
 
