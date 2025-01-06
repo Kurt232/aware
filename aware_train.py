@@ -81,23 +81,63 @@ def get_args_parser():
     parser.set_defaults(enable_aware=False)
     return parser
 
-def calculate_reconstruction_loss(x_enc, mask_dec_out, mask_seq):
+# def calculate_contrastive_loss(x, y, temperature=0.1):
+#     """
+#     x: Final feature tensor for first augmented view [batch_size, d_model]
+#     y: Final feature tensor for second augmented view [batch_size, d_model]
+#     temperature: Temperature parameter for scaling logits
+#     """
+#     # Normalize the features
+#     x = F.normalize(x, dim=1)
+#     y = F.normalize(y, dim=1)
+    
+#     # Compute similarity matrix between positive pairs
+#     batch_size = x.size(0)
+#     labels = torch.arange(batch_size, device=x.device)
+    
+#     # Compute logits
+#     logits_xy = torch.matmul(x, y.t()) / temperature
+#     logits_yx = torch.matmul(y, x.t()) / temperature
+    
+#     # Compute loss for both directions
+#     loss_x = F.cross_entropy(logits_xy, labels)
+#     loss_y = F.cross_entropy(logits_yx, labels)
+    
+#     return (loss_x + loss_y) / 2
+
+def calculate_clip_loss(x, y, temperature=0.07):
     """
-    x_enc: Original input tensor [batch_size, seq_len, num_vars]
-    mask_dec_out: Model's predictions [batch_size, seq_len, num_vars]
-    mask_seq: Mask tensor indicating which positions were masked [batch_size, seq_len]
+    Args:
+        x (torch.Tensor): Feature tensor for first modality, cls token, shape [batch_size, d_model]
+        y (torch.Tensor): Feature tensor for second modality, cls token, shape [batch_size, d_model]
+        temperature (float): Temperature parameter for scaling logits
+
+    Returns:
+        torch.Tensor: Scalar CLIP-like contrastive loss
     """
-    # Only calculate loss on masked positions
-    mask = mask_seq.unsqueeze(-1)  # [batch_size, seq_len, 1]
     
-    # Calculate MSE loss only on masked positions
-    loss = F.mse_loss(mask_dec_out * mask, x_enc * mask, reduction='sum')
+    # Normalize features to unit vectors
+    x = F.normalize(x, dim=1)
+    y = F.normalize(y, dim=1)
     
-    # Normalize by the number of masked elements
-    num_masked = mask.sum()
-    loss = loss / num_masked if num_masked > 0 else loss
+    # Compute pairwise similarity: [batch_size, batch_size]
+    logits_xy = torch.matmul(x, y.t()) / temperature
     
-    return loss
+    # By symmetry, we can reuse the same matrix transposed for the other direction
+    # or simply compute y -> x as well (equivalent to logits_xy.t() if shapes match).
+    logits_yx = logits_xy.t()
+    
+    # Labels: each sample in the batch is the "positive" for itself
+    batch_size = x.size(0)
+    labels = torch.arange(batch_size, device=x.device)
+    
+    # Cross-entropy for x->y
+    loss_xy = F.cross_entropy(logits_xy, labels)
+    # Cross-entropy for y->x
+    loss_yx = F.cross_entropy(logits_yx, labels)
+    
+    # Final CLIP-like loss is the average of the two directions
+    return (loss_xy + loss_yx) / 2
 
 def train_one_epoch(model: nn.Module,
                     data_loader: Iterable, 
@@ -127,8 +167,8 @@ def train_one_epoch(model: nn.Module,
         sync_location_emb = sync_location_emb.to(device, non_blocking=True)
         
         with torch.cuda.amp.autocast():
-            mask_out, mask_seq = model(imu_input, prior_emb=location_emb, prior_y=sync_location_emb)
-            loss = calculate_reconstruction_loss(sync_input, mask_out, mask_seq)
+            x, y = model(imu_input, prior_emb=location_emb, y=sync_input, prior_y=sync_location_emb)
+            loss = calculate_clip_loss(x, y)
 
         loss_value = loss.item()
 

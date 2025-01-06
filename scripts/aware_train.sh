@@ -4,7 +4,7 @@ set -e  # Exit immediately if a command exits with a non-zero status
 ROOT="/data/wjdu/aware"
 MODEL="w_aware"
 SETTING_ID=0
-FLAG="_${SETTING_ID}"
+FLAG="_1"
 
 DATA_CONFIG="data/aware.yaml"
 # TIMESTAMP="_"$(date +%m%d%H%M)
@@ -20,7 +20,7 @@ mkdir -p "$TRAIN_DIR"
 
 CUDA_VISIBLE_DEVICES="$GPUS" torchrun --nproc_per_node=$NNODE --master_port=$MASTER_PORT \
     aware_train.py --data_config "$DATA_CONFIG" \
-    --batch_size 1536 \
+    --batch_size 768 \
     --epochs 400 \
     --warmup_epochs 10 \
     --lr 1e-4 \

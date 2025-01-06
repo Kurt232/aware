@@ -8,12 +8,12 @@ MODEL="w_aware"
 SETTING_ID=1
 PHASE="all"
 MARK=""
-AFFIX="_aware0"
+AFFIX="_aware1"
 
 MASTER_PORT=2233
 NNODE=$(($(echo $GPUS | tr -cd , | wc -c) + 1))
 CONFIGS="data/train"
-LOAD_PATH="/data/wjdu/aware/aware/w_aware_0/checkpoint-399.pth"
+LOAD_PATH="/data/wjdu/aware/aware/w_aware_1/checkpoint-399.pth"
 
 DATA_CONFIG="data/train/s_all.yaml"
 FLAG=$(basename ${DATA_CONFIG%.yaml})
@@ -29,26 +29,26 @@ if [ -f "$LOAD_PATH" ]; then
     echo "Fine-tuning"
 fi
 
-# CUDA_VISIBLE_DEVICES="$GPUS" torchrun --nproc_per_node=$NNODE --master_port=$MASTER_PORT \
-#     train.py --data_config "$DATA_CONFIG" --batch_size 512 \
-#     --epochs 40 --warmup_epochs 10 --blr 1e-4 --min_lr 1e-6 --weight_decay 5e-6 \
-#     --load_path "$LOAD_PATH" \
-#     --output_dir "$TRAIN_DIR" \
-#     --seed 42 \
-#     --setting_id $SETTING_ID \
-#     --enable_aware \
-#     --phase $PHASE \
-#     --d_model 256 \
-#     --n_heads 8 \
-#     --e_layers 3 \
-#     --patch_len 8 \
-#     --stride 8 \
-#     --dropout 0.1 \
-#     --prompt_num 10 \
-#     > "$TRAIN_DIR"/output.log
+CUDA_VISIBLE_DEVICES="$GPUS" torchrun --nproc_per_node=$NNODE --master_port=$MASTER_PORT \
+    train.py --data_config "$DATA_CONFIG" --batch_size 512 \
+    --epochs 40 --warmup_epochs 10 --blr 1e-4 --min_lr 1e-6 --weight_decay 5e-6 \
+    --load_path "$LOAD_PATH" \
+    --output_dir "$TRAIN_DIR" \
+    --seed 42 \
+    --setting_id $SETTING_ID \
+    --enable_aware \
+    --phase $PHASE \
+    --d_model 256 \
+    --n_heads 8 \
+    --e_layers 3 \
+    --patch_len 8 \
+    --stride 8 \
+    --dropout 0.1 \
+    --prompt_num 10 \
+    > "$TRAIN_DIR"/output.log
 
 DATA_CONFIG="data/eval/all.yaml"
 mkdir -p "$OUTPUT_DIR"
 
-CUDA_VISIBLE_DEVICES="$GPUS" python infer.py -l "$TRAIN_DIR" -d "$DATA_CONFIG" -o "$OUTPUT_DIR" > "${OUTPUT_DIR}/output.log"
+CUDA_VISIBLE_DEVICES="$GPUS" python infer.py -l "$TRAIN_DIR" -d "$DATA_CONFIG" -o "$OUTPUT_DIR" --enable_aware > "${OUTPUT_DIR}/output.log"
 CUDA_VISIBLE_DEVICES="$GPUS" python eval.py "$OUTPUT_DIR" > "${OUTPUT_DIR}/output_still.log"
