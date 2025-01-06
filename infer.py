@@ -166,7 +166,7 @@ def eval(eval_file):
         with open(f"{save_base}/error_list.json", "w") as f:
             json.dump(error_list, f, indent=2)
     
-    return acc, 
+    return acc, num_sample
 
 def infer(config_path, model):
     ['downstairs', 'jog', 'lie', 'sit', 'stand', 'upstairs', 'walk']
@@ -225,15 +225,13 @@ def infer(config_path, model):
                         'data_id': data_id.item()
                     })
 
-            result_file = load_path.split('/')[-2] + '_' + data_path.split('/')[-1]
-            prediction_file = os.path.join(save_path, result_file)
-            json.dump(predictions, open(prediction_file, 'w'), indent=2)
+        result_file = load_path.split('/')[-2] + '_' + data_path.split('/')[-1]
+        prediction_file = os.path.join(save_path, result_file)
+        json.dump(predictions, open(prediction_file, 'w'), indent=2)
 
-        print(f"{result_file} ", "Accuracy: {:.4f}%".format(correct_pred / len(dataset) * 100))
-        acc_total[result_file] = correct_pred / len(dataset)
-        num_total[result_file] = len(dataset)
-
-        eval(prediction_file)
+        temp = eval(prediction_file)
+        acc_total[result_file] = temp[0]
+        num_total[result_file] = temp[1]
     print(json.dumps(acc_total, indent=2, sort_keys=True))
     print(json.dumps(num_total, indent=2, sort_keys=True))
     # weight acc
@@ -253,7 +251,7 @@ if __name__ == '__main__':
     # define the model
     model_args = json.load(open(os.path.join(load_path, 'args.json')))['model_args']
     model_args = UniTSArgs.from_dict(model_args)
-    model = UniTS(enc_in=6, num_class=num_class, args=model_args, is_pretrain=False)
+    model = UniTS(enc_in=6, num_class=num_class, args=model_args, task='cls')
     if not load_path.endswith('.pth'):
         best_epoch = json.load(open(os.path.join(load_path, 'best.json')))['best_epoch']
         load_path = os.path.join(load_path, f'checkpoint-{best_epoch}.pth')

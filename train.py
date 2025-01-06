@@ -127,7 +127,7 @@ def main(args):
         f.write(json.dumps(log_args, indent=4) + "\n")
 
     # Define the model
-    model = UniTS(enc_in=6, num_class=7, args=model_args, is_pretrain=False)
+    model = UniTS(enc_in=6, num_class=7, args=model_args, task='cls')
     load_path = args.load_path
     if load_path is not None and os.path.exists(load_path):
         print(f"Loading model from {load_path}")

@@ -1,0 +1,18 @@
+NAME: 'multi'
+TRAIN:
+    LOC:
+        - "upperarm"
+        - "wrist"
+        - "waist"
+        - "thigh"
+    META:
+        - '/data/wjdu/aware/data_sync_4/50_2/realworld_90_TRAIN.json'
+
+TEST:
+    LOC:
+        - "upperarm"
+        - "wrist"
+        - "waist"
+        - "thigh"
+    META:
+        - '/data/wjdu/aware/data_sync_4/50_2/realworld_10_TEST.json'

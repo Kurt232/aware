@@ -16,12 +16,12 @@ from torch.utils.tensorboard import SummaryWriter
 
 import util.lr_sched as lr_sched
 import util.misc as misc
-from data.dataset import IMUDataset
+from data.dataset import IMUSyncDataset
 from models.units import UniTS, UniTSArgs
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
 
 def get_args_parser():
-    parser = argparse.ArgumentParser('UniTS pretraining', add_help=False)
+    parser = argparse.ArgumentParser('UniTS awaretraining', add_help=False)
     parser.add_argument('--batch_size', default=64, type=int,
                         help='Batch size per GPU (effective batch size is batch_size * accum_iter * # gpus')
     parser.add_argument('--epochs', default=400, type=int)
@@ -76,6 +76,7 @@ def get_args_parser():
     # train setting
     parser.add_argument('--setting_id', default=0, type=int, help='training setting')
     parser.add_argument('--phase', default='all', type=str, help='all, cls')
+    # deprecated, always enable aware layer
     parser.add_argument('--enable_aware', action='store_true', help='enable aware layer')
     parser.set_defaults(enable_aware=False)
     return parser
@@ -116,19 +117,18 @@ def train_one_epoch(model: nn.Module,
 
     optimizer.zero_grad()
 
-    for data_iter_step, (label, imu_input, location_emb, _) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
+    for data_iter_step, (_, imu_input, location_emb, _, sync_input, sync_location_emb) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
         if data_iter_step % accum_iter == 0:
             lr_sched.adjust_learning_rate(optimizer, data_iter_step / len(data_loader) + epoch, args)
 
         imu_input = imu_input.to(device, non_blocking=True)
-        if args.enable_aware:
-            location_emb = location_emb.to(device, non_blocking=True)
-        else:
-            location_emb = None
+        sync_input = sync_input.to(device, non_blocking=True)
+        location_emb = location_emb.to(device, non_blocking=True)
+        sync_location_emb = sync_location_emb.to(device, non_blocking=True)
         
         with torch.cuda.amp.autocast():
-            mask_out, mask_seq = model(imu_input, prior_emb=location_emb)
-            loss = calculate_reconstruction_loss(imu_input, mask_out, mask_seq)
+            mask_out, mask_seq = model(imu_input, prior_emb=location_emb, prior_y=sync_location_emb)
+            loss = calculate_reconstruction_loss(sync_input, mask_out, mask_seq)
 
         loss_value = loss.item()
 
@@ -193,7 +193,7 @@ def main(args):
         f.write(json.dumps(log_args, indent=4) + "\n")
 
     # Create dataset
-    dataset_train = IMUDataset(args.data_config, augment_round=augment_round, is_train=True)
+    dataset_train = IMUSyncDataset(args.data_config, augment_round=augment_round, is_train=True)
     print(f"train dataset size: {len(dataset_train)}")
 
     # Split into train and validation sets
@@ -241,7 +241,7 @@ def main(args):
         enc_in=6,  # 6 channels for IMU data (3 acc + 3 gyro)
         num_class=7,  # Number of activity classes
         args=args,
-        task='pretrain'
+        task='aware'
     )
     model.to(device)
 
