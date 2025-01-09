@@ -735,7 +735,7 @@ class UniTS(nn.Module):
                       seq_len, attn_mask=attn_mask)
         return x
 
-    def classification(self, x, prior_emb=None):
+    def classification(self, x, prior_emb=None, return_feature=False):
         prefix_prompt = self.prompt_tokens
         task_prompt = self.cls_tokens
         category_token = self.category_tokens
@@ -751,7 +751,7 @@ class UniTS(nn.Module):
         if prior_emb is not None:
             x = self.prior_aware(x, prior_emb)
             
-        x = self.cls_head(x, category_token)
+        x = self.cls_head(x, category_token, return_feature=return_feature)
 
         return x
 

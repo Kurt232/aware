@@ -31,7 +31,6 @@ def plot(output_dir):
     # Subplot 2: Losses vs. Epoch
     axs[1].plot(df['epoch'], df['train_closs'], label='Train Loss')
     axs[1].plot(df['epoch'], df['val_loss'], label='Validation Loss')
-    axs[1].plot(df['epoch'], df['test_loss'], label='Test Loss')
     axs[1].set_title('Loss vs. Epoch')
     axs[1].set_xlabel('Epoch')
     axs[1].set_ylabel('Loss')
@@ -41,7 +40,6 @@ def plot(output_dir):
     # Subplot 3: Accuracies vs. Epoch
     axs[2].plot(df['epoch'], df['train_acc'], label='Train Accuracy')
     axs[2].plot(df['epoch'], df['val_acc'], label='Validation Accuracy')
-    axs[2].plot(df['epoch'], df['test_acc'], label='Test Accuracy')
     axs[2].set_title('Accuracy vs. Epoch')
     axs[2].set_xlabel('Epoch')
     axs[2].set_ylabel('Accuracy (%)')

@@ -168,8 +168,6 @@ def main(args):
     # Create the train dataset
     dataset_train = IMUDataset(args.data_config, augment_round=augment_round, is_train=True)
     print(f"train dataset size: {len(dataset_train)}")
-    dataset_test = IMUDataset(args.data_config, is_train=False)
-    print(f"test dataset size: {len(dataset_test)}")
 
     # Split the dataset into training, validation, and test sets (80-10-10)
     val_size = len(dataset_train) // 9
@@ -194,14 +192,10 @@ def main(args):
     sampler_val = torch.utils.data.DistributedSampler(
         dataset_val, num_replicas=num_tasks, rank=global_rank, shuffle=False
     )
-    sampler_test = torch.utils.data.DistributedSampler(
-        dataset_test, num_replicas=num_tasks, rank=global_rank, shuffle=False
-    )
 
     print("Sampler_train = %s" % str(sampler_train))
     print("Sampler_val = %s" % str(sampler_val))
-    print("Sampler_test = %s" % str(sampler_test))
-
+    
     # Create data loaders
     data_loader_train = torch.utils.data.DataLoader(
         dataset_train, sampler=sampler_train,
@@ -219,14 +213,6 @@ def main(args):
         drop_last=False,
     )
 
-    data_loader_test = torch.utils.data.DataLoader(
-        dataset_test, sampler=sampler_test,
-        batch_size=args.batch_size,
-        num_workers=args.num_workers,
-        pin_memory=args.pin_mem,
-        drop_last=False,
-    )
-
     # SummaryWriter
     if global_rank == 0 and args.log_dir is not None:
         os.makedirs(args.log_dir, exist_ok=True)
@@ -236,7 +222,6 @@ def main(args):
 
     best_epoch = 0
     best_vali_acc = 0.0
-    best_epoch_test_acc = 0.0
     span = 10
 
     print(f"Start training for {args.epochs} epochs")
@@ -244,7 +229,6 @@ def main(args):
     for epoch in range(args.start_epoch, args.epochs):
         data_loader_train.sampler.set_epoch(epoch)
         data_loader_val.sampler.set_epoch(epoch)
-        data_loader_test.sampler.set_epoch(epoch)
 
         train_stats = train_one_epoch(
             model, data_loader_train,
@@ -259,12 +243,6 @@ def main(args):
             device, epoch, args=args
         )
 
-        # Evaluate on the test set
-        test_stats = evaluate(
-            model, data_loader_test,
-            device, epoch, args=args, is_test=True
-        )
-
         if args.output_dir and (epoch % span == 0 or epoch + 1 == args.epochs):
             misc.save_model(
                 args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
@@ -274,7 +252,6 @@ def main(args):
         if args.output_dir and best_vali_acc < val_stats['acc'] and epoch > span:
             best_vali_acc = val_stats['acc']
             best_epoch = epoch
-            best_epoch_test_acc = test_stats['acc']
             if epoch % span == 0 or epoch + 1 == args.epochs:
                 continue
             misc.save_model(
@@ -285,7 +262,6 @@ def main(args):
         log_stats = {
             **{f'train_{k}': v for k, v in train_stats.items()},
             **{f'val_{k}': v for k, v in val_stats.items()},
-            **{f'test_{k}': v for k, v in test_stats.items()},
             'epoch': epoch
         }
 
@@ -302,7 +278,7 @@ def main(args):
     
     if args.output_dir and misc.is_main_process():
         with open(os.path.join(args.output_dir, "best.json"), mode="w", encoding="utf-8") as f:
-            f.write(json.dumps({"best_epoch": best_epoch, "vali_acc": best_vali_acc, "test_acc": best_epoch_test_acc}, indent=4) + "\n")
+            f.write(json.dumps({"best_epoch": best_epoch, "vali_acc": best_vali_acc}, indent=4) + "\n")
 
 
 if __name__ == '__main__':
