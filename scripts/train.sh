@@ -3,8 +3,7 @@ MODEL="UniTS_HEAD"
 SETTING_ID=0
 MARK="_cls"
 
-DATA_CONFIG="data/3datasets/m_th_c.yaml"
-LOAD_PATH="${ROOT}/pretrain/UniTS_HEAD_12291627/checkpoint-399.pth"
+DATA_CONFIG="data/config.yaml"
 
 TRAIN_DIR="${ROOT}/output/${MODEL}${MARK}/${MODEL}_m_th_c"
 mkdir -p "$TRAIN_DIR"

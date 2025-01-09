@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
 set -e  # Exit immediately if a command exits with a non-zero status
 
-ROOT="/data/wjdu/aware"
-MODEL="w_aware"
-SETTING_ID=0
-FLAG="_${SETTING_ID}"
+ROOT="/data/wjdu/hal"
+MODEL="w_ae"
+SETTING_ID=1
+FLAG="${SETTING_ID}"
 
 DATA_CONFIG="data/aware.yaml"
 # TIMESTAMP="_"$(date +%m%d%H%M)
-TRAIN_DIR="${ROOT}/aware/${MODEL}${FLAG}${TIMESTAMP}"
+TRAIN_DIR="${ROOT}/pretrain/${MODEL}${FLAG}${TIMESTAMP}"
 
 mkdir -p "$TRAIN_DIR"
 
-GPUS="0,1,2,3,4,5,6,7"
-MASTER_PORT=4233
+GPUS="6,7"
+MASTER_PORT=2433
 NNODE=$(($(echo $GPUS | tr -cd , | wc -c) + 1))
 
 mkdir -p "$TRAIN_DIR"

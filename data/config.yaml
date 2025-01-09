@@ -5,14 +5,15 @@ TRAIN:
         - "wrist"
         - "waist"
         - "thigh"
-    META:
-        - '/data/wjdu/benchmark/data_4_2/50_2/realworld_90_TRAIN.json'
+    META: # all data to train
+        - '/data/wjdu/hal/data_sync/train/realworld.json'
+        # - '/data/wjdu/hal/data_sync/test/realworld.json'
 
 TEST:
     LOC:
-        - "upperarm"
-        - "wrist"
-        - "waist"
-        - "thigh"
+        - 'wrist'
+        - 'thigh'
+        - 'upperarm'
+        - 'waist'
     META:
         - '/data/wjdu/hal/data_sync/ft_10/realworld.json' # 10% realworld
