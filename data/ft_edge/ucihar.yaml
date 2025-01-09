@@ -1,0 +1,17 @@
+NAME: ucihar
+TRAIN:
+  LOC:
+  - wrist
+  - thigh
+  - upperarm
+  - waist
+  META:
+  - '/data/wjdu/hal/data/test/ucihar.json'
+TEST:
+  LOC:
+  - wrist
+  - thigh
+  - upperarm
+  - waist
+  META:
+  - '/data/wjdu/hal/data/train/ucihar.json'

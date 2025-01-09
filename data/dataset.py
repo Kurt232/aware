@@ -104,28 +104,24 @@ class IMUSyncDataset(Dataset):
             print(f"{meta_path}: len {len(meta_l)}")
             data_list += meta_l
 
-        # It can't gurantee the sync data.
-        # self.sensor_dimen = 3
-        # if is_train and augment_round > 0:
-        #     _data_list = []
-        #     # rotation_matrix = special_ortho_group.rvs(self.sensor_dimen, augment_round) # all instance shared the same random rotation matrix
-        #     # if augment_round == 1:
-        #     #     rotation_matrix = np.expand_dims(rotation_matrix, axis=0)
-        #     for data in data_list:
-        #         _data = data.copy()
-        #         instance = np.array(data['imu_input'], dtype=np.float32)
-        #         rotation_matrix = special_ortho_group.rvs(self.sensor_dimen, augment_round) # for each instance, generate random rotation matrix
-        #         if augment_round == 1:
-        #             rotation_matrix = np.expand_dims(rotation_matrix, axis=0)
-        #         for i in range(augment_round):
-        #             instance_new = instance.copy().reshape(instance.shape[0], instance.shape[1] // self.sensor_dimen, self.sensor_dimen)
-        #             for j in range(instance_new.shape[1]):
-        #                 instance_new[:, j, :] = np.dot(instance_new[:, j, :], rotation_matrix[i])
-        #             instance_new = instance_new.reshape(instance.shape[0], instance.shape[1])
-        #             _data['imu_input'] = instance_new
-        #             _data_list.append(_data)
-        #     print(f"before data_list: {len(data_list)}")
-        #     data_list += _data_list
+        self.sensor_dimen = 3
+        if is_train and augment_round > 0:
+            _data_list = []
+            for data in data_list:
+                _data = data.copy()
+                instance = np.array(data['imu_input'], dtype=np.float32)
+                rotation_matrix = special_ortho_group.rvs(self.sensor_dimen, augment_round) # for each instance, generate random rotation matrix
+                if augment_round == 1:
+                    rotation_matrix = np.expand_dims(rotation_matrix, axis=0)
+                for i in range(augment_round):
+                    instance_new = instance.copy().reshape(instance.shape[0], instance.shape[1] // self.sensor_dimen, self.sensor_dimen)
+                    for j in range(instance_new.shape[1]):
+                        instance_new[:, j, :] = np.dot(instance_new[:, j, :], rotation_matrix[i])
+                    instance_new = instance_new.reshape(instance.shape[0], instance.shape[1])
+                    _data['imu_input'] = instance_new
+                    _data_list.append(_data)
+            print(f"before data_list: {len(data_list)}")
+            data_list += _data_list
 
         self.data_list = pd.DataFrame(data_list)
         print(f"total length: {len(self)}")

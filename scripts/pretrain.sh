@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
 set -e  # Exit immediately if a command exits with a non-zero status
 
-ROOT="/data/wjdu/aware"
-MODEL="w_aware_lr"
+ROOT="/data/wjdu/hal"
+MODEL="base"
 SETTING_ID=1
 FLAG="_${SETTING_ID}"
 
-DATA_CONFIG="data/config.yaml"
+DATA_CONFIG="data/aware.yaml"
 # TIMESTAMP="_"$(date +%m%d%H%M)
 TRAIN_DIR="${ROOT}/pretrain/${MODEL}${FLAG}${TIMESTAMP}"
 
 mkdir -p "$TRAIN_DIR"
 
-GPUS="0,1,2,3,4,5,6,7"
-MASTER_PORT=4233
+GPUS="3"
+MASTER_PORT=4333
 NNODE=$(($(echo $GPUS | tr -cd , | wc -c) + 1))
 
 mkdir -p "$TRAIN_DIR"
@@ -28,7 +28,6 @@ CUDA_VISIBLE_DEVICES="$GPUS" torchrun --nproc_per_node=$NNODE --master_port=$MAS
     --weight_decay 5e-6 \
     --output_dir "$TRAIN_DIR" \
     --setting_id $SETTING_ID \
-    --enable_aware \
     --seed 42 \
     --d_model 256 \
     --n_heads 8 \

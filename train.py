@@ -195,7 +195,6 @@ def main(args):
 
     print("Sampler_train = %s" % str(sampler_train))
     print("Sampler_val = %s" % str(sampler_val))
-    
     # Create data loaders
     data_loader_train = torch.utils.data.DataLoader(
         dataset_train, sampler=sampler_train,

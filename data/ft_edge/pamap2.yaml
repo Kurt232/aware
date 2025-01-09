@@ -1,0 +1,18 @@
+NAME: pamap2
+TRAIN:
+  LOC:
+  - wrist
+  - thigh
+  - upperarm
+  - waist
+  META:
+  - '/data/wjdu/hal/data/test/pamap2.json'
+TEST:
+  LOC:
+  - wrist
+  - thigh
+  - upperarm
+  - waist
+  META:
+  - '/data/wjdu/hal/data/train/pamap2.json'
+
