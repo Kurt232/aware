@@ -187,7 +187,6 @@ def main(args):
 
     print("Sampler_train = %s" % str(sampler_train))
     print("Sampler_val = %s" % str(sampler_val))
-    
     # Create data loaders
     if len(dataset_train) < args.batch_size * num_tasks:
         print(f"Warning: Training dataset size ({len(dataset_train)}) is smaller than batch size ({args.batch_size}), and will be set to the dataset size")

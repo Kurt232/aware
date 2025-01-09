@@ -13,9 +13,9 @@ AFFIX=""
 MASTER_PORT=3533
 NNODE=$(($(echo $GPUS | tr -cd , | wc -c) + 1))
 
-DATA_CONFIG="data/config.yaml"
+DATA_CONFIG="data/sup.yaml"
 FLAG=$(basename ${DATA_CONFIG%.yaml})
-TRAIN_DIR="${ROOT}/sup_90/${MODEL}${MARK}"
+TRAIN_DIR="${ROOT}/sup/${MODEL}${MARK}"
 
 mkdir -p "$TRAIN_DIR"
 
@@ -44,14 +44,14 @@ CUDA_VISIBLE_DEVICES="$GPUS" torchrun --nproc_per_node=$NNODE --master_port=$MAS
     --prompt_num 10 \
     > "$TRAIN_DIR"/output.log
 
-# OUTPUT_DIR="${ROOT}/result/sup_90/${MODEL}${MARK}"
-# mkdir -p "$OUTPUT_DIR"
-# CUDA_VISIBLE_DEVICES="$GPUS" python infer.py -l "$TRAIN_DIR" -d "$DATA_CONFIG" -o "$OUTPUT_DIR" --enable_aware > "${OUTPUT_DIR}/output.log"
-# CUDA_VISIBLE_DEVICES="$GPUS" python eval.py "$OUTPUT_DIR" > "${OUTPUT_DIR}/output_still.log"
+OUTPUT_DIR="${ROOT}/result/sup/${MODEL}${MARK}"
+mkdir -p "$OUTPUT_DIR"
+CUDA_VISIBLE_DEVICES="$GPUS" python infer.py -l "$TRAIN_DIR" -d "$DATA_CONFIG" -o "$OUTPUT_DIR" --enable_aware > "${OUTPUT_DIR}/output.log"
+CUDA_VISIBLE_DEVICES="$GPUS" python eval.py "$OUTPUT_DIR" > "${OUTPUT_DIR}/output_still.log"
 
 
 MODEL="wo_aware"
-TRAIN_DIR="${ROOT}/sup_90/${MODEL}${MARK}"
+TRAIN_DIR="${ROOT}/sup/${MODEL}${MARK}"
 
 mkdir -p "$TRAIN_DIR"
 
@@ -79,7 +79,7 @@ CUDA_VISIBLE_DEVICES="$GPUS" torchrun --nproc_per_node=$NNODE --master_port=$MAS
     --prompt_num 10 \
     > "$TRAIN_DIR"/output.log
 
-# OUTPUT_DIR="${ROOT}/result/sup_90/${MODEL}${MARK}"
-# mkdir -p "$OUTPUT_DIR"
-# CUDA_VISIBLE_DEVICES="$GPUS" python infer.py -l "$TRAIN_DIR" -d "$DATA_CONFIG" -o "$OUTPUT_DIR" > "${OUTPUT_DIR}/output.log"
-# CUDA_VISIBLE_DEVICES="$GPUS" python eval.py "$OUTPUT_DIR" > "${OUTPUT_DIR}/output_still.log"
+OUTPUT_DIR="${ROOT}/result/sup/${MODEL}${MARK}"
+mkdir -p "$OUTPUT_DIR"
+CUDA_VISIBLE_DEVICES="$GPUS" python infer.py -l "$TRAIN_DIR" -d "$DATA_CONFIG" -o "$OUTPUT_DIR" > "${OUTPUT_DIR}/output.log"
+CUDA_VISIBLE_DEVICES="$GPUS" python eval.py "$OUTPUT_DIR" > "${OUTPUT_DIR}/output_still.log"

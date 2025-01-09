@@ -1,0 +1,17 @@
+NAME: hhar
+TRAIN:
+  LOC:
+  - wrist
+  - thigh
+  - upperarm
+  - waist
+  META:
+  - '/data/wjdu/hal/data/test/hhar.json'
+TEST:
+  LOC:
+  - wrist
+  - thigh
+  - upperarm
+  - waist
+  META:
+  - '/data/wjdu/hal/data/train/hhar.json'

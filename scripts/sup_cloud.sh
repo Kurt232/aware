@@ -11,7 +11,8 @@ MARK=""
 
 MASTER_PORT=2600
 NNODE=$(($(echo $GPUS | tr -cd , | wc -c) + 1))
-CONFIGS="data/sup"
+CONFIGS="data/ft_edge"
+LOAD_PATH="${ROOT}/pretrain/${MODEL}${MARK}/checkpoint-399.pth"
 
 # Count total number of tasks
 TASK_LEN=$(ls $CONFIGS/*.yaml | wc -l)
@@ -24,8 +25,11 @@ for DATA_CONFIG in $CONFIGS/*.yaml; do
     # Increment loop index
     CURRENT_IDX=$((CURRENT_IDX + 1))
 
-    if [[ "$(basename "$DATA_CONFIG")" =~ ^_ ]]; then
-        echo "Skip $DATA_CONFIG"
+    FLAG=$(basename ${DATA_CONFIG%.yaml})
+    TRAIN_DIR="${ROOT}/ft_edge/${MODEL}${MARK}/${MODEL}_${FLAG}"
+    
+    # if exists TRAIN_DIR, skip
+    if [ -d "$TRAIN_DIR" ]; then
         continue
     fi
     
@@ -47,8 +51,8 @@ for DATA_CONFIG in $CONFIGS/*.yaml; do
     mkdir -p "$TRAIN_DIR"
 
     CUDA_VISIBLE_DEVICES="$GPUS" torchrun --nproc_per_node=$NNODE --master_port=$MASTER_PORT \
-        train.py --data_config "$DATA_CONFIG" --batch_size 512 \
-        --epochs 80 --warmup_epochs 10 --blr 1e-4 --min_lr 1e-6 --weight_decay 5e-6 \
+        train.py --data_config "$DATA_CONFIG" --batch_size 128 \
+        --epochs 40 --warmup_epochs 10 --blr 1e-4 --min_lr 1e-6 --weight_decay 5e-6 \
         --load_path "$LOAD_PATH" \
         --output_dir "$TRAIN_DIR" \
         --seed 42 \
@@ -64,6 +68,7 @@ for DATA_CONFIG in $CONFIGS/*.yaml; do
         --prompt_num 10 \
         > "$TRAIN_DIR"/output.log
     
+    OUTPUT_DIR="${ROOT}/result/ft_edge/${MODEL}${MARK}/${MODEL}_${FLAG}"
     mkdir -p "$OUTPUT_DIR"
 
     CUDA_VISIBLE_DEVICES="$GPUS" python infer.py -l "$TRAIN_DIR" -d "$DATA_CONFIG" -o "$OUTPUT_DIR" --enable_aware --enable_cross > "${OUTPUT_DIR}/output.log"

@@ -2,7 +2,7 @@
 set -e  # Exit immediately if a command exits with a non-zero status
 
 ROOT="/data/wjdu/hal/0121"
-MODEL="w_ae"
+MODEL="w_clip"
 SETTING_ID=1
 # FLAG="${SETTING_ID}"
 

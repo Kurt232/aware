@@ -28,7 +28,6 @@ CUDA_VISIBLE_DEVICES="$GPUS" torchrun --nproc_per_node=$NNODE --master_port=$MAS
     --weight_decay 5e-6 \
     --output_dir "$TRAIN_DIR" \
     --setting_id $SETTING_ID \
-    --enable_aware \
     --seed 42 \
     --d_model 256 \
     --n_heads 8 \
