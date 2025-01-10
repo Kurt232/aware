@@ -81,7 +81,6 @@ class IMUDataset(Dataset):
 
         imu_input = torch.tensor(imu_data, dtype=torch.float32)
         assert imu_input.shape[1] == 6, f"imu_input shape: {imu_input.shape}"
-        caption = caption.split(', ')[-1].strip()
         label = torch.tensor([self.mapping[caption]], dtype=torch.int8)
         
         location_embedding = self.location_embeddings[location]

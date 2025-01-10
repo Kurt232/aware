@@ -608,8 +608,10 @@ class AwareLayer(nn.Module):
         self.norm = nn.LayerNorm(d_model)
 
     def forward(self, x, prior_emb):
+        # prior_emb: [B, N, D]
+        n_prior = prior_emb.shape[1]
         # Project prior embedding
-        emb = self.prior_mlp(prior_emb)  # [B, 1, D]
+        emb = self.prior_mlp(prior_emb)  # [B, N, D]
         
         # Reshape inputs
         B, V, L, D = x.shape
@@ -623,7 +625,7 @@ class AwareLayer(nn.Module):
         x_out = self.att(x_with_emb)  # [B*V, L+1, D]
         
         # Split back to original sequence and prior embedding
-        x = x_out[:, :-1]  # [B*V, L, D]
+        x = x_out[:, :n_prior]  # [B*V, L, D]
         x = x.view(B, V, L, D)
         return self.norm(x)
 
