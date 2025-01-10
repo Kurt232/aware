@@ -1,0 +1,23 @@
+NAME: 'sup 100% realworld'
+TRAIN:
+    LOC:
+        - "upperarm"
+        - "wrist"
+        - "waist"
+        - "thigh"
+    META:
+        - '/data/wjdu/hal/data_sync/train/realworld.json' # 90% realworld
+        - '/data/wjdu/hal/data_sync/test/realworld.json' # 10% realworld
+
+TEST:
+    LOC:
+        - 'wrist'
+        - 'thigh'
+        - 'upperarm'
+        - 'waist'
+    META:
+    - '/data/wjdu/hal/data/train/hhar.json'
+    - '/data/wjdu/hal/data/train/pamap2.json'
+    - '/data/wjdu/hal/data/train/shoaib.json'
+    - '/data/wjdu/hal/data/train/motion.json'
+    - '/data/wjdu/hal/data/train/ucihar.json'

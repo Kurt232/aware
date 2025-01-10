@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 set -e  # Exit immediately if a command exits with a non-zero status
 
-GPUS="4,5"
+GPUS="6,7"
 
-ROOT="/data/wjdu/hal/0110"
-MODEL="w_aware"
+ROOT="/data/wjdu/hal/0109"
+MODEL="wo_aware"
 SETTING_ID=1
 PHASE="all"
 MARK=""
 
-MASTER_PORT=2222
+MASTER_PORT=2232
 NNODE=$(($(echo $GPUS | tr -cd , | wc -c) + 1))
 CONFIGS="data/sup"
 
@@ -28,7 +28,7 @@ for DATA_CONFIG in $CONFIGS/*.yaml; do
         echo "Skip $DATA_CONFIG"
         continue
     fi
-
+    
     FLAG=$(basename ${DATA_CONFIG%.yaml})
     TRAIN_DIR="${ROOT}/sup/${MODEL}${MARK}_${FLAG}"
     OUTPUT_DIR="${ROOT}/result/sup/${MODEL}${MARK}_${FLAG}"
@@ -43,7 +43,7 @@ for DATA_CONFIG in $CONFIGS/*.yaml; do
         echo "TRAIN_DIR exists, skip"
         continue
     fi
-    
+
     mkdir -p "$TRAIN_DIR"
 
     CUDA_VISIBLE_DEVICES="$GPUS" torchrun --nproc_per_node=$NNODE --master_port=$MASTER_PORT \
@@ -53,7 +53,6 @@ for DATA_CONFIG in $CONFIGS/*.yaml; do
         --output_dir "$TRAIN_DIR" \
         --seed 42 \
         --setting_id $SETTING_ID \
-        --enable_aware \
         --phase $PHASE \
         --d_model 256 \
         --n_heads 8 \
@@ -66,6 +65,6 @@ for DATA_CONFIG in $CONFIGS/*.yaml; do
     
     mkdir -p "$OUTPUT_DIR"
 
-    CUDA_VISIBLE_DEVICES="$GPUS" python infer.py -l "$TRAIN_DIR" -d "$DATA_CONFIG" -o "$OUTPUT_DIR" --enable_aware > "${OUTPUT_DIR}/output.log"
+    CUDA_VISIBLE_DEVICES="$GPUS" python infer.py -l "$TRAIN_DIR" -d "$DATA_CONFIG" -o "$OUTPUT_DIR" > "${OUTPUT_DIR}/output.log"
     CUDA_VISIBLE_DEVICES="$GPUS" python eval.py "$OUTPUT_DIR" > "${OUTPUT_DIR}/output_still.log"
 done

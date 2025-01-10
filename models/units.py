@@ -597,37 +597,61 @@ class ForecastHead(nn.Module):
         return x
 
 
-class AwareLayer(nn.Module):
-    def __init__(self, clip_dim, d_model, n_head, mlp_ratio=4, dropout=0):
+class FeedForward(nn.Module):
+    def __init__(
+        self,
+        dim: int, # 256
+        hidden_dim: int, # 256 * 4
+        multiple_of: int, # 256
+    ):
         super().__init__()
-        self.att = SeqAttention(d_model, n_head, proj_drop=dropout)
-        self.prior_mlp = nn.Sequential(
-            Mlp(in_features=clip_dim, out_features=d_model, hidden_features=int(d_model*mlp_ratio), act_layer=nn.GELU, drop=dropout),
-            Mlp(in_features=d_model, out_features=d_model, hidden_features=int(d_model*mlp_ratio), act_layer=nn.GELU, drop=dropout),
+        hidden_dim = int(2 * hidden_dim / 3) # 256 * 4 * 2 / 3 = 682
+        hidden_dim = multiple_of * ((hidden_dim + multiple_of - 1) // multiple_of) # 256 * ((682 + 256 - 1) // 256) = 768
+
+        self.w1 = nn.Linear(
+            dim, hidden_dim, bias=False,
         )
+        self.w2 = nn.Linear(
+            hidden_dim, dim, bias=False,
+        )
+        self.w3 = nn.Linear(
+            dim, hidden_dim, bias=False,
+        )
+
+    def forward(self, x):
+        return self.w2(F.silu(self.w1(x)) * self.w3(x))
+
+
+class AwareLayer(nn.Module):
+    def __init__(self, d_clip, d_model, n_head, mlp_ratio=4, dropout=0):
+        super().__init__()
+        self.prior_proj = nn.Linear(d_clip, d_model, bias=False)
+        self.att = SeqAttention(d_model, n_head, proj_drop=dropout)
+        self.ffn = FeedForward(dim=d_model, hidden_dim=d_model * mlp_ratio, multiple_of=256)
         self.norm = nn.LayerNorm(d_model)
 
     def forward(self, x, prior_emb):
-        # prior_emb: [B, N, D]
-        n_prior = prior_emb.shape[1]
         # Project prior embedding
-        emb = self.prior_mlp(prior_emb)  # [B, N, D]
-        
+        emb = self.prior_proj(prior_emb)  # [B, N, D]
+        n_prior = prior_emb.shape[1]
+
         # Reshape inputs
         B, V, L, D = x.shape
         x = x.view(B*V, L, D)  # [B*V, L, D]
         
         # Expand and append prior embedding to sequence
-        emb = emb.unsqueeze(1).expand(B, V, 1, D).reshape(B*V, 1, D)  # [B*V, 1, D]
-        x_with_emb = torch.cat([x, emb], dim=1)  # [B*V, L+1, D]
+        emb = emb.unsqueeze(1).repeat(1, V, 1, 1).reshape(B*V, n_prior, D)  # [B*V, N, D]
+        x_with_emb = torch.cat([emb, x], dim=1)  # [B*V, L+N, D]
         
         # Apply self-attention
-        x_out = self.att(x_with_emb)  # [B*V, L+1, D]
-        
+        x_out = self.att(x_with_emb)  # [B*V, L+N, D]
+        x = x + self.ffn(x)
+
         # Split back to original sequence and prior embedding
-        x = x_out[:, :n_prior]  # [B*V, L, D]
+        x = x_out[:, n_prior:]  # [B*V, L, D]
         x = x.view(B, V, L, D)
-        return self.norm(x)
+        x = self.norm(x)
+        return x
 
 
 class UniTS(nn.Module):
@@ -696,9 +720,9 @@ class UniTS(nn.Module):
             self.pretrain_head = ForecastHead(
                 args.d_model, args.patch_len, args.stride, args.stride, prefix_token_length=1, head_dropout=args.dropout)
 
-        # Prior knowledge projection
-        clip_dim = 512
-        self.prior_aware = AwareLayer(clip_dim, args.d_model, args.n_heads, dropout=args.dropout)
+        # Prior knowledge injection
+        d_clip = 512
+        self.prior_aware = AwareLayer(d_clip, args.d_model, args.n_heads, dropout=args.dropout)
         
         if self.phase == 'cls':
             for name, param in self.named_parameters():
