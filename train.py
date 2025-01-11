@@ -197,6 +197,11 @@ def main(args):
     print("Sampler_val = %s" % str(sampler_val))
     
     # Create data loaders
+    if len(dataset_train) < args.batch_size:
+        print(f"Warning: Training dataset size ({len(dataset_train)}) is smaller than batch size ({args.batch_size})")
+    if len(dataset_val) < args.batch_size:
+        print(f"Warning: Validation dataset size ({len(dataset_val)}) is smaller than batch size ({args.batch_size})")
+        
     data_loader_train = torch.utils.data.DataLoader(
         dataset_train, sampler=sampler_train,
         batch_size=args.batch_size,
@@ -222,6 +227,10 @@ def main(args):
 
     best_epoch = 0
     best_vali_acc = 0.0
+    best_vali_loss = 0.0
+    lowest_epoch = 0
+    lowest_vali_acc = 0.0
+    lowest_vali_loss = float('inf')
     span = 10
 
     print(f"Start training for {args.epochs} epochs")
@@ -243,21 +252,25 @@ def main(args):
             device, epoch, args=args
         )
 
-        if args.output_dir and (epoch % span == 0 or epoch + 1 == args.epochs):
-            misc.save_model(
-                args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
-                loss_scaler=loss_scaler, epoch=epoch
-            )
-        
-        if args.output_dir and best_vali_acc < val_stats['acc'] and epoch > span:
-            best_vali_acc = val_stats['acc']
-            best_epoch = epoch
+        if args.output_dir:
+            is_save = False
+            if best_vali_acc < val_stats['acc']:
+                best_vali_acc = val_stats['acc']
+                best_vali_loss = val_stats['loss']
+                best_epoch = epoch
+                is_save = True
+            if lowest_vali_loss > val_stats['loss']:
+                lowest_vali_loss = val_stats['loss']
+                lowest_vali_acc = val_stats['acc']
+                lowest_epoch = epoch
+                is_save = True
             if epoch % span == 0 or epoch + 1 == args.epochs:
-                continue
-            misc.save_model(
-                args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
-                loss_scaler=loss_scaler, epoch=epoch
-            )
+                is_save = True
+            if is_save:
+                misc.save_model(
+                    args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
+                    loss_scaler=loss_scaler, epoch=epoch
+                )
 
         log_stats = {
             **{f'train_{k}': v for k, v in train_stats.items()},
@@ -278,7 +291,14 @@ def main(args):
     
     if args.output_dir and misc.is_main_process():
         with open(os.path.join(args.output_dir, "best.json"), mode="w", encoding="utf-8") as f:
-            f.write(json.dumps({"best_epoch": best_epoch, "vali_acc": best_vali_acc}, indent=4) + "\n")
+            f.write(json.dumps({
+                "best_epoch": best_epoch, 
+                "vali_acc": best_vali_acc, 
+                "best_vali_loss": best_vali_loss,
+                "lowest_epoch": lowest_epoch, 
+                "lowest_vali_loss": lowest_vali_loss,
+                "lowest_vali_acc": lowest_vali_acc
+            }, indent=4) + "\n")
 
 
 if __name__ == '__main__':

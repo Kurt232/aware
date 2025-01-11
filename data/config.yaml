@@ -15,4 +15,4 @@ TEST:
         - "waist"
         - "thigh"
     META:
-        - '/data/wjdu/benchmark/data_4_2/50_2/realworld_10_TEST.json'
+        - '/data/wjdu/hal/data_sync/ft_10/realworld.json' # 10% realworld

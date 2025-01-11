@@ -12,8 +12,7 @@ import torch
 
 def eval(eval_file):
     # Configuration
-    # device = "cuda" if torch.cuda.is_available() else "cpu"
-    device = "cpu"
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     label_list = ['downstairs', 'jog', 'static', 'upstairs', 'walk'] # 5
     bert_model = BertModel.from_pretrained('bert-large-uncased').to(device)
     bert_tokenizer = AutoTokenizer.from_pretrained('bert-large-uncased', model_max_length=512)

@@ -25,7 +25,7 @@ def get_args_parser():
     parser.add_argument('-o', '--output_dir', default=None,
                         help='path where to save, empty for no saving')
     parser.add_argument('--enable_aware', action='store_true', help='enable aware layer')
-    parser.set_defaults(enable_aware=False)
+    parser.add_argument('--enable_cross', action='store_true', help='evaluate cross-dataset')
     return parser
 
 args = get_args_parser().parse_args()
@@ -34,6 +34,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 load_path = args.load_path
 save_path = args.output_dir
 enable_aware = args.enable_aware
+enable_cross = args.enable_cross
 
 num_class = 7
 config_paths = args.data_config
@@ -51,7 +52,7 @@ def eval(eval_file):
     from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
     import matplotlib.pyplot as plt
     # Configuration
-    device = "cpu"
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     label_list = ['downstairs', 'jog', 'lie', 'sit', 'stand', 'upstairs', 'walk']
     bert_model = BertModel.from_pretrained('bert-large-uncased').to(device)
     bert_tokenizer = AutoTokenizer.from_pretrained('bert-large-uncased', model_max_length=512)
@@ -166,7 +167,7 @@ def eval(eval_file):
         with open(f"{save_base}/error_list.json", "w") as f:
             json.dump(error_list, f, indent=2)
     
-    return acc, 
+    return acc, num_sample
 
 def infer(config_path, model):
     ['downstairs', 'jog', 'lie', 'sit', 'stand', 'upstairs', 'walk']
@@ -225,15 +226,13 @@ def infer(config_path, model):
                         'data_id': data_id.item()
                     })
 
-            result_file = load_path.split('/')[-2] + '_' + data_path.split('/')[-1]
-            prediction_file = os.path.join(save_path, result_file)
-            json.dump(predictions, open(prediction_file, 'w'), indent=2)
+        result_file = load_path.split('/')[-2] + '_' + data_path.split('/')[-1]
+        prediction_file = os.path.join(save_path, result_file)
+        json.dump(predictions, open(prediction_file, 'w'), indent=2)
 
-        print(f"{result_file} ", "Accuracy: {:.4f}%".format(correct_pred / len(dataset) * 100))
-        acc_total[result_file] = correct_pred / len(dataset)
-        num_total[result_file] = len(dataset)
-
-        eval(prediction_file)
+        temp = eval(prediction_file)
+        acc_total[result_file] = temp[0]
+        num_total[result_file] = temp[1]
     print(json.dumps(acc_total, indent=2, sort_keys=True))
     print(json.dumps(num_total, indent=2, sort_keys=True))
     # weight acc
@@ -251,18 +250,29 @@ def infer(config_path, model):
 
 if __name__ == '__main__':
     # define the model
+    if load_path.endswith('.pth'):
+        load_file = os.path.basename(load_path)
+        load_path = os.path.dirname(load_path)
+    else:
+        load_file = None
+
     model_args = json.load(open(os.path.join(load_path, 'args.json')))['model_args']
     model_args = UniTSArgs.from_dict(model_args)
     model = UniTS(enc_in=6, num_class=num_class, args=model_args, is_pretrain=False)
-    if not load_path.endswith('.pth'):
-        best_epoch = json.load(open(os.path.join(load_path, 'best.json')))['best_epoch']
-        load_path = os.path.join(load_path, f'checkpoint-{best_epoch}.pth')
+    if load_file is None:
+        record = json.load(open(os.path.join(load_path, 'best.json')))
+        if enable_cross:
+            epoch = record['lowest_epoch']
+        else:
+            epoch = record['best_epoch']
+        load_file = f'checkpoint-{epoch}.pth'
+    load_path = os.path.join(load_path, load_file)
     assert load_path is not None and os.path.exists(load_path)
     
     plot(os.path.dirname(load_path))
 
     pretrained_mdl = torch.load(load_path, map_location='cpu')
-    msg = model.load_state_dict(pretrained_mdl['model'], strict=True)
+    msg = model.load_state_dict(pretrained_mdl['model'], strict=False)
     print(msg)
     
     model.to(device) # device is cuda

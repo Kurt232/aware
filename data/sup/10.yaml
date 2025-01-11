@@ -6,7 +6,7 @@ TRAIN:
         - "waist"
         - "thigh"
     META:
-        - '/data/wjdu/hal/data_sync/test/realworld.json' # 10% realworld
+        - '/data/wjdu/hal/data_sync/ft_10/realworld.json' # 10% realworld
 
 TEST:
     LOC:
@@ -15,8 +15,8 @@ TEST:
         - 'upperarm'
         - 'waist'
     META:
-    - '/data/wjdu/hal/data/train/hhar.json'
-    - '/data/wjdu/hal/data/train/pamap2.json'
-    - '/data/wjdu/hal/data/train/shoaib.json'
-    - '/data/wjdu/hal/data/train/motion.json'
-    - '/data/wjdu/hal/data/train/ucihar.json'
+    - '/data/wjdu/hal/data/90/hhar.json'
+    - '/data/wjdu/hal/data/90/pamap2.json'
+    - '/data/wjdu/hal/data/90/shoaib.json'
+    - '/data/wjdu/hal/data/90/motion.json'
+    - '/data/wjdu/hal/data/90/ucihar.json'

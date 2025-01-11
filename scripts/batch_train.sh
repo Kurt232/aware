@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 set -e  # Exit immediately if a command exits with a non-zero status
 
-GPUS="4,5"
+GPUS="0"
 
-ROOT="/data/wjdu/hal/0110"
-MODEL="w_aware"
+ROOT="/data/wjdu/hal/0111"
+MODEL="w_sup"
 SETTING_ID=1
 PHASE="all"
 MARK=""
 
-MASTER_PORT=2222
+MASTER_PORT=2322
 NNODE=$(($(echo $GPUS | tr -cd , | wc -c) + 1))
 CONFIGS="data/sup"
 
