@@ -597,63 +597,6 @@ class ForecastHead(nn.Module):
         return x
 
 
-class FeedForward(nn.Module):
-    def __init__(
-        self,
-        dim: int, # 256
-        hidden_dim: int, # 256 * 4
-        multiple_of: int, # 256
-    ):
-        super().__init__()
-        hidden_dim = int(2 * hidden_dim / 3) # 256 * 4 * 2 / 3 = 682
-        hidden_dim = multiple_of * ((hidden_dim + multiple_of - 1) // multiple_of) # 256 * ((682 + 256 - 1) // 256) = 768
-
-        self.w1 = nn.Linear(
-            dim, hidden_dim, bias=False,
-        )
-        self.w2 = nn.Linear(
-            hidden_dim, dim, bias=False,
-        )
-        self.w3 = nn.Linear(
-            dim, hidden_dim, bias=False,
-        )
-
-    def forward(self, x):
-        return self.w2(F.silu(self.w1(x)) * self.w3(x))
-
-
-class AwareLayer(nn.Module):
-    def __init__(self, d_clip, d_model, n_head, mlp_ratio=4, dropout=0):
-        super().__init__()
-        self.prior_proj = nn.Linear(d_clip, d_model, bias=False)
-        self.att = SeqAttention(d_model, n_head, proj_drop=dropout)
-        self.ffn = FeedForward(dim=d_model, hidden_dim=d_model * mlp_ratio, multiple_of=256)
-        self.norm = nn.LayerNorm(d_model)
-
-    def forward(self, x, prior_emb):
-        # Project prior embedding
-        emb = self.prior_proj(prior_emb)  # [B, N, D]
-        n_prior = prior_emb.shape[1]
-
-        # Reshape inputs
-        B, V, L, D = x.shape
-        x = x.view(B*V, L, D)  # [B*V, L, D]
-        
-        # Expand and append prior embedding to sequence
-        emb = emb.unsqueeze(1).repeat(1, V, 1, 1).reshape(B*V, n_prior, D)  # [B*V, N, D]
-        x_with_emb = torch.cat([emb, x], dim=1)  # [B*V, L+N, D]
-        
-        # Apply self-attention
-        x_out = self.att(x_with_emb)  # [B*V, L+N, D]
-        x = x + self.ffn(x)
-
-        # Split back to original sequence and prior embedding
-        x = x_out[:, n_prior:]  # [B*V, L, D]
-        x = x.view(B, V, L, D)
-        x = self.norm(x)
-        return x
-
-
 class UniTS(nn.Module):
     """
     UniTS: Building a Unified Time Series Model
@@ -722,7 +665,7 @@ class UniTS(nn.Module):
 
         # Prior knowledge injection
         d_clip = 512
-        self.prior_aware = AwareLayer(d_clip, args.d_model, args.n_heads, dropout=args.dropout)
+        self.prior_proj = nn.Linear(d_clip, args.d_model)
         
         if self.phase == 'cls':
             for name, param in self.named_parameters():
@@ -773,9 +716,15 @@ class UniTS(nn.Module):
         x = self.prepare_prompt(
             x, n_vars, prefix_prompt, task_prompt)
 
-        x = self.backbone(x, prefix_prompt.shape[2], seq_len)
         if prior_emb is not None:
-            x = self.prior_aware(x, prior_emb)
+            prior_emb = self.prior_proj(prior_emb) # [B, N, D]
+            n_prior = prior_emb.shape[1]
+            prior_emb = prior_emb.unsqueeze(1) # [B, 1, N, D]
+            prior_emb = prior_emb.repeat(1, n_vars, 1, 1) # [B, V, N, D]
+            x = torch.cat((prior_emb, x), dim=2) # [B, V, L+N, D]
+            x = self.backbone(x, prefix_prompt.shape[2] + n_prior, seq_len)
+        else:
+            x = self.backbone(x, prefix_prompt.shape[2], seq_len)
             
         x = self.cls_head(x, category_token, return_feature=return_feature)
 
@@ -881,10 +830,15 @@ class UniTS(nn.Module):
         this_function_prompt = cls_token.repeat(x.shape[0], 1, 1, 1)
         x = torch.cat((this_prompt, x, this_function_prompt), dim=2)
 
-        x = self.backbone(x, prefix_prompt.shape[2], seq_token_len)
-
         if prior_emb is not None:
-            x = self.prior_aware(x, prior_emb)
+            prior_emb = self.prior_proj(prior_emb) # [B, N, D]
+            n_prior = prior_emb.shape[1]
+            prior_emb = prior_emb.unsqueeze(1) # [B, 1, N, D]
+            prior_emb = prior_emb.repeat(1, n_vars, 1, 1) # [B, V, N, D]
+            x = torch.cat((prior_emb, x), dim=2) # [B, V, L+N, D]
+            x = self.backbone(x, prefix_prompt.shape[2] + n_prior, seq_token_len)
+        else:
+            x = self.backbone(x, prefix_prompt.shape[2], seq_token_len)
         
         mask_dec_out = self.forecast_head(
             x[:, :, :-1], seq_len+padding, seq_token_len)
