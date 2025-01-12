@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e  # Exit immediately if a command exits with a non-zero status
 
-ROOT="/data/wjdu/hal"
+ROOT="/data/wjdu/hal/0113"
 MODEL="w_ae"
 SETTING_ID=1
 FLAG="${SETTING_ID}"
