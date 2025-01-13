@@ -1,17 +1,22 @@
 #!/usr/bin/env bash
 set -e  # Exit immediately if a command exits with a non-zero status
 
-GPUS="4,5"
+GPUS="0,2,3"
 
 ROOT=$1
-MODEL="wo_sup"
+MODEL="w_sup"
 SETTING_ID=1
 PHASE="all"
 MARK=""
+CONFIGS=$2
 
-MASTER_PORT=2332
+if [[ $3 =~ ^[0-9]+$ ]]; then
+    MASTER_PORT=$(( $3 + 10 ))
+else
+    echo "Error: The third argument must be a number."
+    exit 1
+fi
 NNODE=$(($(echo $GPUS | tr -cd , | wc -c) + 1))
-CONFIGS="data/sup"
 
 # Count total number of tasks
 TASK_LEN=$(ls $CONFIGS/*.yaml | wc -l)
@@ -28,7 +33,7 @@ for DATA_CONFIG in $CONFIGS/*.yaml; do
         echo "Skip $DATA_CONFIG"
         continue
     fi
-    
+
     FLAG=$(basename ${DATA_CONFIG%.yaml})
     TRAIN_DIR="${ROOT}/sup/${MODEL}${MARK}_${FLAG}"
     OUTPUT_DIR="${ROOT}/result/sup/${MODEL}${MARK}_${FLAG}"
@@ -43,16 +48,17 @@ for DATA_CONFIG in $CONFIGS/*.yaml; do
         echo "TRAIN_DIR exists, skip"
         continue
     fi
-
+    
     mkdir -p "$TRAIN_DIR"
 
     CUDA_VISIBLE_DEVICES="$GPUS" torchrun --nproc_per_node=$NNODE --master_port=$MASTER_PORT \
         train.py --data_config "$DATA_CONFIG" --batch_size 512 \
-        --epochs 40 --warmup_epochs 10 --blr 1e-4 --min_lr 1e-6 --weight_decay 5e-6 \
+        --epochs 80 --warmup_epochs 10 --blr 1e-4 --min_lr 1e-6 --weight_decay 5e-6 \
         --load_path "$LOAD_PATH" \
         --output_dir "$TRAIN_DIR" \
         --seed 42 \
         --setting_id $SETTING_ID \
+        --enable_aware \
         --phase $PHASE \
         --d_model 256 \
         --n_heads 8 \
@@ -65,6 +71,6 @@ for DATA_CONFIG in $CONFIGS/*.yaml; do
     
     mkdir -p "$OUTPUT_DIR"
 
-    CUDA_VISIBLE_DEVICES="$GPUS" python infer.py -l "$TRAIN_DIR" -d "$DATA_CONFIG" -o "$OUTPUT_DIR" --enable_cross > "${OUTPUT_DIR}/output.log"
+    CUDA_VISIBLE_DEVICES="$GPUS" python infer.py -l "$TRAIN_DIR" -d "$DATA_CONFIG" -o "$OUTPUT_DIR" --enable_aware --enable_cross > "${OUTPUT_DIR}/output.log"
     CUDA_VISIBLE_DEVICES="$GPUS" python eval.py "$OUTPUT_DIR" > "${OUTPUT_DIR}/output_still.log"
 done

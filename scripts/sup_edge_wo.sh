@@ -12,7 +12,7 @@ MARK=""
 CONFIGS=$2
 
 if [[ $3 =~ ^[0-9]+$ ]]; then
-    MASTER_PORT=$(( $3 + 30 ))
+    MASTER_PORT=$(( $3 + 20 ))
 else
     echo "Error: The third argument must be a number."
     exit 1
@@ -45,7 +45,7 @@ for DATA_CONFIG in $CONFIGS/*.yaml; do
 
     CUDA_VISIBLE_DEVICES="$GPUS" torchrun --nproc_per_node=$NNODE --master_port=$MASTER_PORT \
         train.py --data_config "$DATA_CONFIG" --batch_size 32 \
-        --epochs 40 --warmup_epochs 10 --blr 1e-4 --min_lr 1e-6 --weight_decay 5e-6 \
+        --epochs 80 --warmup_epochs 10 --blr 1e-4 --min_lr 1e-6 --weight_decay 5e-6 \
         --load_path "$LOAD_PATH" \
         --output_dir "$TRAIN_DIR" \
         --seed 42 \
@@ -62,6 +62,6 @@ for DATA_CONFIG in $CONFIGS/*.yaml; do
 
     OUTPUT_DIR="${ROOT}/result/sup_edge/${MODEL}${MARK}/${MODEL}_${FLAG}"
     mkdir -p "$OUTPUT_DIR"
-    CUDA_VISIBLE_DEVICES="$GPUS" python infer.py -l "$TRAIN_DIR" -d "$DATA_CONFIG" -o "$OUTPUT_DIR" --enable_cross > "${OUTPUT_DIR}/output.log"
+    CUDA_VISIBLE_DEVICES="$GPUS" python infer.py -l "$TRAIN_DIR" -d "$DATA_CONFIG" -o "$OUTPUT_DIR" > "${OUTPUT_DIR}/output.log"
     CUDA_VISIBLE_DEVICES="$GPUS" python eval.py "$OUTPUT_DIR" > "${OUTPUT_DIR}/output_still.log"
 done

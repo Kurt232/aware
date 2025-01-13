@@ -129,7 +129,7 @@ def main(args):
     # Define the model
     model = UniTS(enc_in=6, num_class=7, args=model_args, is_pretrain=False)
     load_path = args.load_path
-    if load_path is not None:
+    if load_path is not None and load_path != "":
         if not os.path.exists(load_path):
             raise FileNotFoundError(f"Model file not found: {load_path}")
         print(f"Loading model from {load_path}")
