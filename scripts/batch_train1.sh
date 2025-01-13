@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -e  # Exit immediately if a command exits with a non-zero status
 
-GPUS="1,2,3"
+GPUS="4,5"
 
-ROOT="/data/wjdu/hal/0111"
+ROOT=$1
 MODEL="wo_sup"
 SETTING_ID=1
 PHASE="all"
@@ -48,7 +48,7 @@ for DATA_CONFIG in $CONFIGS/*.yaml; do
 
     CUDA_VISIBLE_DEVICES="$GPUS" torchrun --nproc_per_node=$NNODE --master_port=$MASTER_PORT \
         train.py --data_config "$DATA_CONFIG" --batch_size 512 \
-        --epochs 80 --warmup_epochs 10 --blr 1e-4 --min_lr 1e-6 --weight_decay 5e-6 \
+        --epochs 40 --warmup_epochs 10 --blr 1e-4 --min_lr 1e-6 --weight_decay 5e-6 \
         --load_path "$LOAD_PATH" \
         --output_dir "$TRAIN_DIR" \
         --seed 42 \
@@ -65,6 +65,6 @@ for DATA_CONFIG in $CONFIGS/*.yaml; do
     
     mkdir -p "$OUTPUT_DIR"
 
-    CUDA_VISIBLE_DEVICES="$GPUS" python infer.py -l "$TRAIN_DIR" -d "$DATA_CONFIG" -o "$OUTPUT_DIR" > "${OUTPUT_DIR}/output.log"
+    CUDA_VISIBLE_DEVICES="$GPUS" python infer.py -l "$TRAIN_DIR" -d "$DATA_CONFIG" -o "$OUTPUT_DIR" --enable_cross > "${OUTPUT_DIR}/output.log"
     CUDA_VISIBLE_DEVICES="$GPUS" python eval.py "$OUTPUT_DIR" > "${OUTPUT_DIR}/output_still.log"
 done

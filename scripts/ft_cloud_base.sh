@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
 set -e  # Exit immediately if a command exits with a non-zero status
 
-GPUS="2"
-MASTER_PORT=2232
-NNODE=$(($(echo $GPUS | tr -cd , | wc -c) + 1))
+GPUS="3"
 
 # base
 ROOT=$1
@@ -14,6 +12,15 @@ MARK=""
 
 LOAD_PATH="${ROOT}/pretrain/${MODEL}${MARK}/checkpoint-399.pth"
 DATA_CONFIG=$2
+
+
+if [[ $3 =~ ^[0-9]+$ ]]; then
+    MASTER_PORT=$(( $3 + 20 ))
+else
+    echo "Error: The third argument must be a number."
+    exit 1
+fi
+NNODE=$(($(echo $GPUS | tr -cd , | wc -c) + 1))
 
 TRAIN_DIR="${ROOT}/ft_cloud/${MODEL}${MARK}"
 mkdir -p "$TRAIN_DIR"
@@ -37,5 +44,5 @@ CUDA_VISIBLE_DEVICES="$GPUS" torchrun --nproc_per_node=$NNODE --master_port=$MAS
 
 OUTPUT_DIR="${ROOT}/result/ft_cloud/${MODEL}${MARK}"
 mkdir -p "$OUTPUT_DIR"
-CUDA_VISIBLE_DEVICES="$GPUS" python infer.py -l "$TRAIN_DIR" -d "$DATA_CONFIG" -o "$OUTPUT_DIR" > "${OUTPUT_DIR}/output.log"
+CUDA_VISIBLE_DEVICES="$GPUS" python infer.py -l "$TRAIN_DIR" -d "$DATA_CONFIG" -o "$OUTPUT_DIR" --enable_cross > "${OUTPUT_DIR}/output.log"
 CUDA_VISIBLE_DEVICES="$GPUS" python eval.py "$OUTPUT_DIR" > "${OUTPUT_DIR}/output_still.log"

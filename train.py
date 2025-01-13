@@ -129,7 +129,9 @@ def main(args):
     # Define the model
     model = UniTS(enc_in=6, num_class=7, args=model_args, is_pretrain=False)
     load_path = args.load_path
-    if load_path is not None and os.path.exists(load_path):
+    if load_path is not None:
+        if not os.path.exists(load_path):
+            raise FileNotFoundError(f"Model file not found: {load_path}")
         print(f"Loading model from {load_path}")
         pretrained_mdl = torch.load(load_path, map_location='cpu')['model']
         msg = model.load_state_dict(pretrained_mdl, strict=False)
@@ -169,8 +171,8 @@ def main(args):
     dataset_train = IMUDataset(args.data_config, augment_round=augment_round, is_train=True)
     print(f"train dataset size: {len(dataset_train)}")
 
-    # Split the dataset into training, validation, and test sets (80-10-10)
-    val_size = len(dataset_train) // 9
+    # Split the dataset into training, validation (8:2)
+    val_size = max(len(dataset_train) // 9, 40)
     train_size = len(dataset_train) - val_size
 
     # Ensure reproducibility across different processes
@@ -264,7 +266,7 @@ def main(args):
                 lowest_vali_acc = val_stats['acc']
                 lowest_epoch = epoch
                 is_save = True
-            if epoch % span == 0 or epoch + 1 == args.epochs:
+            if (epoch + 1) % span == 0 or epoch + 1 == args.epochs:
                 is_save = True
             if is_save:
                 misc.save_model(

@@ -1,11 +1,4 @@
-#!/usr/bin/env bash
 set -e
-
-
-TARGET=$1
-ROOT=$2
-DATA_CONFIG=$3
-MASTER_PORT=$4
 
 # Store background process IDs
 pids=()
@@ -22,13 +15,9 @@ cleanup() {
 # Trap SIGINT (Ctrl+C) and call cleanup
 trap cleanup SIGINT
 
-for script in $(ls scripts/*.sh); do
-    if [[ "$script" =~ ^$TARGET.*\.sh$ ]]; then
-        echo "Running $script"
-        bash $script "$ROOT" "$DATA_CONFIG" $MASTER_PORT &
-        # Store the process ID
-        pids+=($!)
-    fi
-done
+bash scripts/batch_train.sh "/data/wjdu/hal/0113" &
+pids+=($!)
+bash scripts/batch_train1.sh "/data/wjdu/hal/0113" &
+pids+=($!)
 
 wait

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e  # Exit immediately if a command exits with a non-zero status
 
-GPUS="7"
+GPUS="6"
 
 ROOT=$1
 MODEL="w_clip_sg"
@@ -9,10 +9,16 @@ SETTING_ID=1
 PHASE="all"
 MARK=""
 
-MASTER_PORT=2282
-NNODE=$(($(echo $GPUS | tr -cd , | wc -c) + 1))
 CONFIGS=$2
 LOAD_PATH="${ROOT}/pretrain/${MODEL}${MARK}/checkpoint-399.pth"
+
+if [[ $3 =~ ^[0-9]+$ ]]; then
+    MASTER_PORT=$(( $3 + 30 ))
+else
+    echo "Error: The third argument must be a number."
+    exit 1
+fi
+NNODE=$(($(echo $GPUS | tr -cd , | wc -c) + 1))
 
 # Count total number of tasks
 TASK_LEN=$(ls $CONFIGS/*.yaml | wc -l)
@@ -39,7 +45,7 @@ for DATA_CONFIG in $CONFIGS/*.yaml; do
     echo "Output directory: $TRAIN_DIR"
 
     CUDA_VISIBLE_DEVICES="$GPUS" torchrun --nproc_per_node=$NNODE --master_port=$MASTER_PORT \
-        train.py --data_config "$DATA_CONFIG" --batch_size 128 \
+        train.py --data_config "$DATA_CONFIG" --batch_size 32 \
         --epochs 40 --warmup_epochs 10 --blr 1e-4 --min_lr 1e-6 --weight_decay 5e-6 \
         --load_path "$LOAD_PATH" \
         --output_dir "$TRAIN_DIR" \
@@ -58,6 +64,6 @@ for DATA_CONFIG in $CONFIGS/*.yaml; do
     
     OUTPUT_DIR="${ROOT}/result/ft_edge/${MODEL}${MARK}/${MODEL}_${FLAG}"
     mkdir -p "$OUTPUT_DIR"
-    CUDA_VISIBLE_DEVICES="$GPUS" python infer.py -l "$TRAIN_DIR" -d "$DATA_CONFIG" -o "$OUTPUT_DIR" --enable_aware > "${OUTPUT_DIR}/output.log"
+    CUDA_VISIBLE_DEVICES="$GPUS" python infer.py -l "$TRAIN_DIR" -d "$DATA_CONFIG" -o "$OUTPUT_DIR" --enable_aware --enable_cross > "${OUTPUT_DIR}/output.log"
     CUDA_VISIBLE_DEVICES="$GPUS" python eval.py "$OUTPUT_DIR" > "${OUTPUT_DIR}/output_still.log"
 done

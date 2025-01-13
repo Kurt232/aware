@@ -1,0 +1,1 @@
+/home/wjdu/miniconda3/envs/adav/bin/python -u train.py --data_config data/sup/100.yaml --batch_size 512 --epochs 40 --warmup_epochs 10 --blr 1e-4 --min_lr 1e-6 --weight_decay 5e-6 --load_path  --output_dir /data/wjdu/hal/0113/sup/wo_sup_100 --seed 42 --setting_id 1 --phase all --d_model 256 --n_heads 8 --e_layers 3 --patch_len 8 --stride 8 --dropout 0.1 --prompt_num 10

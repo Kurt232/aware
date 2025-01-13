@@ -6,7 +6,7 @@ TRAIN:
         - "waist"
         - "thigh"
     META:
-        - '/data/wjdu/hal/data_sync/train/realworld.json' # 90% realworld
+        - '/data/wjdu/hal/data_sync/90/realworld.json' # 90% realworld
 
 TEST:
     LOC:
