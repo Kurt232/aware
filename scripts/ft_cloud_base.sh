@@ -7,7 +7,7 @@ GPUS="3"
 ROOT=$1
 MODEL="base"
 SETTING_ID=1
-PHASE="all"
+PHASE="cls"
 MARK=""
 
 LOAD_PATH="${ROOT}/pretrain/${MODEL}${MARK}/checkpoint-399.pth"

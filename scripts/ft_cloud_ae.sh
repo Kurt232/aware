@@ -8,7 +8,7 @@ ROOT=$1
 DATA_CONFIG=$2
 MODEL="w_ae"
 SETTING_ID=1
-PHASE="all"
+PHASE="cls"
 MARK=""
 
 LOAD_PATH="${ROOT}/pretrain/${MODEL}${MARK}/checkpoint-399.pth"

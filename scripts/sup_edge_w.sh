@@ -50,6 +50,7 @@ for DATA_CONFIG in $CONFIGS/*.yaml; do
         --output_dir "$TRAIN_DIR" \
         --seed 42 \
         --setting_id $SETTING_ID \
+        --enable_aware \
         --phase $PHASE \
         --d_model 256 \
         --n_heads 8 \

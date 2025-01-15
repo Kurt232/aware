@@ -1,0 +1,17 @@
+NAME: shoaib
+TRAIN:
+  LOC:
+  - wrist
+  - thigh
+  - upperarm
+  - waist
+  META:
+  - '/data/wjdu/hal/data/ft_5/shoaib.json'
+TEST:
+  LOC:
+  - wrist
+  - thigh
+  - upperarm
+  - waist
+  META:
+  - '/data/wjdu/hal/data/90/shoaib.json'

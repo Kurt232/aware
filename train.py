@@ -199,9 +199,10 @@ def main(args):
     print("Sampler_val = %s" % str(sampler_val))
     
     # Create data loaders
-    if len(dataset_train) < args.batch_size:
-        print(f"Warning: Training dataset size ({len(dataset_train)}) is smaller than batch size ({args.batch_size})")
-    if len(dataset_val) < args.batch_size:
+    if len(dataset_train) < args.batch_size * num_tasks:
+        print(f"Warning: Training dataset size ({len(dataset_train)}) is smaller than batch size ({args.batch_size}), and will be set to the dataset size")
+        args.batch_size = len(dataset_train) // num_tasks
+    if len(dataset_val) < args.batch_size * num_tasks:
         print(f"Warning: Validation dataset size ({len(dataset_val)}) is smaller than batch size ({args.batch_size})")
         
     data_loader_train = torch.utils.data.DataLoader(

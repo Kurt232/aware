@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -e  # Exit immediately if a command exits with a non-zero status
 
-GPUS="7"
+GPUS="5"
 
 ROOT=$1
 MODEL="w_clip"
 SETTING_ID=1
-PHASE="all"
+PHASE="cls"
 MARK=""
 
 CONFIGS=$2

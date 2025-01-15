@@ -1,5 +1,6 @@
 set -e
 
+ROOT=$1
 # Store background process IDs
 pids=()
 
@@ -15,9 +16,9 @@ cleanup() {
 # Trap SIGINT (Ctrl+C) and call cleanup
 trap cleanup SIGINT
 
-bash scripts/batch_train.sh "/data/wjdu/hal/0113" &
+bash scripts/sup_cloud.sh "$ROOT" &
 pids+=($!)
-bash scripts/batch_train1.sh "/data/wjdu/hal/0113" &
+bash scripts/sup_cloud_wo.sh "$ROOT" &
 pids+=($!)
 
 wait

@@ -1,0 +1,23 @@
+NAME: 'ft 1% realworld'
+TRAIN:
+    LOC:
+        - 'wrist'
+        - 'thigh'
+        - 'upperarm'
+        - 'waist'
+    META:
+        - '/data/wjdu/hal/data_sync/ft_1/realworld.json'
+
+TEST:
+    LOC:
+        - 'wrist'
+        - 'thigh'
+        - 'upperarm'
+        - 'waist'
+    META:
+    # hhar.json    pamap2.json     shoaib.json  uschar.json domino.json  motion.json  realworld.json  ucihar.json
+    - '/data/wjdu/hal/data/90/hhar.json'
+    - '/data/wjdu/hal/data/90/pamap2.json'
+    - '/data/wjdu/hal/data/90/shoaib.json'
+    - '/data/wjdu/hal/data/90/motion.json'
+    - '/data/wjdu/hal/data/90/ucihar.json'
