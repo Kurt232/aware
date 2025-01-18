@@ -57,8 +57,6 @@ def train_one_epoch(model: nn.Module,
         # Loss
         loss = c_loss
         loss_value = loss.item()
-        c_loss_value = c_loss.item()
-        m_loss_value = c_loss
 
         if not math.isfinite(loss_value):
             print("Loss is {}, stopping training".format(loss_value))
@@ -72,23 +70,22 @@ def train_one_epoch(model: nn.Module,
 
         torch.cuda.synchronize()
 
-        metric_logger.update(closs=c_loss_value)
-        metric_logger.update(mloss=m_loss_value)
+        metric_logger.update(loss=loss_value)
 
         lr = optimizer.param_groups[0]["lr"]
         metric_logger.update(lr=lr)
 
-        loss_value_reduce = misc.all_reduce_mean(loss_value)
-        c_loss_value_reduce = misc.all_reduce_mean(c_loss_value)
-        m_loss_value_reduce = misc.all_reduce_mean(m_loss_value)
-        if log_writer is not None and (data_iter_step + 1) % accum_iter == 0:
-            """ We use epoch_1000x as the x-axis in tensorboard.
-            This calibrates different curves when batch size changes.
-            """
-            epoch_1000x = int((data_iter_step / len(data_loader) + epoch) * 1000)
-            log_writer.add_scalar('c_train_loss', c_loss_value_reduce, epoch_1000x)
-            log_writer.add_scalar('m_train_loss', m_loss_value_reduce, epoch_1000x)
-            log_writer.add_scalar('lr', lr, epoch_1000x)
+        # loss_value_reduce = misc.all_reduce_mean(loss_value)
+        # c_loss_value_reduce = misc.all_reduce_mean(c_loss_value)
+        # m_loss_value_reduce = misc.all_reduce_mean(m_loss_value)
+        # if log_writer is not None and (data_iter_step + 1) % accum_iter == 0:
+        #     """ We use epoch_1000x as the x-axis in tensorboard.
+        #     This calibrates different curves when batch size changes.
+        #     """
+        #     epoch_1000x = int((data_iter_step / len(data_loader) + epoch) * 1000)
+        #     log_writer.add_scalar('c_train_loss', c_loss_value_reduce, epoch_1000x)
+        #     log_writer.add_scalar('m_train_loss', m_loss_value_reduce, epoch_1000x)
+        #     log_writer.add_scalar('lr', lr, epoch_1000x)
 
 
     # Compute accuracy

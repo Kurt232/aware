@@ -216,7 +216,12 @@ def main(args):
     sampler_val = torch.utils.data.DistributedSampler(
         dataset_val, num_replicas=num_tasks, rank=global_rank, shuffle=False
     )
-
+    
+    if len(dataset_train) < args.batch_size * num_tasks:
+        print(f"Warning: Training dataset size ({len(dataset_train)}) is smaller than batch size ({args.batch_size}), and will be set to the dataset size")
+        args.batch_size = len(dataset_train) // num_tasks
+    if len(dataset_val) < args.batch_size * num_tasks:
+        print(f"Warning: Validation dataset size ({len(dataset_val)}) is smaller than batch size ({args.batch_size})")
     # Create data loaders
     data_loader_train = torch.utils.data.DataLoader(
         dataset_train, 
