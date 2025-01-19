@@ -661,7 +661,7 @@ class UniTS(nn.Module):
     d_model=256, stride=8, 
     patch_len=8, dropout=0.1, 
     e_layers=3, n_heads=8,
-    right_prob=0.5, min_mask_ratio=0.7, max_mask_ratio=0.8
+    min_mask_ratio=0.7, max_mask_ratio=0.8
     """
 
     def __init__(self, 
@@ -673,7 +673,6 @@ class UniTS(nn.Module):
 
         self.task = task
         if task == 'pretrain' or task == 'aware':
-            self.right_prob = args.right_prob
             self.min_mask_ratio = args.min_mask_ratio
             self.max_mask_ratio = args.max_mask_ratio
             self.phase = 'all'
@@ -830,13 +829,6 @@ class UniTS(nn.Module):
 
         return mask
 
-    def choose_masking(self, x, right_prob, min_mask_ratio, max_mask_ratio):
-        # Generate a random number to decide which masking function to use
-        if torch.rand(1).item() > right_prob:
-            return self.random_masking(x, min_mask_ratio, max_mask_ratio)
-        else:
-            return self.right_masking(x, min_mask_ratio, max_mask_ratio)
-
     def get_mask_seq(self, mask, seq_len):
         mask_seq = mask.unsqueeze(dim=-1).repeat(1, 1, self.patch_len)
         mask_seq = mask_seq.permute(0, 2, 1)
@@ -865,8 +857,7 @@ class UniTS(nn.Module):
         this_prompt = prefix_prompt.repeat(x.shape[0], 1, 1, 1)
 
         # mask 
-        mask = self.choose_masking(x, self.right_prob,
-                                    self.min_mask_ratio, self.max_mask_ratio)
+        mask = self.random_masking(x, self.min_mask_ratio, self.max_mask_ratio)
         mask_repeat = mask.unsqueeze(dim=1).unsqueeze(dim=-1)
         mask_repeat = mask_repeat.repeat(1, x.shape[1], 1, x.shape[-1])
         x = x * (1-mask_repeat) + mask_token * mask_repeat  # todo
@@ -908,8 +899,7 @@ class UniTS(nn.Module):
         this_prompt = prefix_prompt.repeat(x.shape[0], 1, 1, 1)
 
         # mask 
-        mask = self.choose_masking(x, self.right_prob,
-                                    self.min_mask_ratio, self.max_mask_ratio)
+        mask = self.random_masking(x, self.min_mask_ratio, self.max_mask_ratio)
         mask_repeat = mask.unsqueeze(dim=1).unsqueeze(dim=-1)
         mask_repeat = mask_repeat.repeat(1, x.shape[1], 1, x.shape[-1])
         x = x * (1-mask_repeat) + mask_token * mask_repeat  # todo
@@ -959,7 +949,6 @@ class UniTSArgs:
     phase: str
     load_path: str = None
     # pretrain
-    right_prob: float = None
     min_mask_ratio: float = None
     max_mask_ratio: float = None
 

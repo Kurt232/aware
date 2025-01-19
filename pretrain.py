@@ -38,7 +38,6 @@ def get_args_parser():
     parser.add_argument('--prompt_num', default=10, type=int)
     
     # Pretrain parameters
-    parser.add_argument('--right_prob', default=0.5, type=float)
     parser.add_argument('--min_mask_ratio', default=0.7, type=float)
     parser.add_argument('--max_mask_ratio', default=0.8, type=float)
 
@@ -149,13 +148,47 @@ def train_one_epoch(model: nn.Module,
         lr = optimizer.param_groups[0]["lr"]
         metric_logger.update(lr=lr)
 
-        if log_writer is not None and (data_iter_step + 1) % accum_iter == 0:
-            epoch_1000x = int((data_iter_step / len(data_loader) + epoch) * 1000)
-            log_writer.add_scalar('train_loss', loss_value, epoch_1000x)
-            log_writer.add_scalar('lr', lr, epoch_1000x)
+        # if log_writer is not None and (data_iter_step + 1) % accum_iter == 0:
+        #     epoch_1000x = int((data_iter_step / len(data_loader) + epoch) * 1000)
+        #     log_writer.add_scalar('train_loss', loss_value, epoch_1000x)
+        #     log_writer.add_scalar('lr', lr, epoch_1000x)
 
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+
+def evaluate(model: nn.Module,
+                   data_loader: Iterable, 
+                   device: torch.device, 
+                   epoch: int, 
+                   log_writer=None,
+                   args=None):
+    model.eval()
+    metric_logger = misc.MetricLogger(delimiter="  ")
+    header = f'Epoch: [{epoch}] Vali:'
+    print_freq = 10
+
+    with torch.no_grad():
+        for label, imu_input, location_emb, _ in metric_logger.log_every(data_loader, print_freq, header):
+            imu_input = imu_input.to(device, non_blocking=True)
+            if args.enable_aware:
+                location_emb = location_emb.to(device, non_blocking=True)
+            else:
+                location_emb = None
+            
+            with torch.cuda.amp.autocast():
+                mask_out, mask_seq = model(imu_input, prior_emb=location_emb)
+                loss = calculate_reconstruction_loss(imu_input, mask_out, mask_seq)
+
+            loss_value = loss.item()
+            if not math.isfinite(loss_value):
+                    print("Loss is {}, stopping evaluation".format(loss_value))
+                    sys.exit(1)
+            
+            metric_logger.update(loss=loss_value)
+
+    metric_logger.synchronize_between_processes()
+    print("Averaged stats for Vali:", metric_logger)
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 def main(args):
@@ -281,6 +314,10 @@ def main(args):
     print(f"Start pretraining for {args.epochs} epochs")
     start_time = time.time()
     
+    lowest_vali_epoch = 0
+    lowest_vali_loss = float('inf')
+    span = 20
+
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
             data_loader_train.sampler.set_epoch(epoch)
@@ -294,16 +331,32 @@ def main(args):
             args=args
         )
 
+        # Evaluate
+        val_stats = evaluate(
+            model, data_loader_val,
+            device, epoch, log_writer=log_writer,
+            args=args
+        )
+
         # Save checkpoint
-        if args.output_dir and (epoch % 20 == 0 or epoch + 1 == args.epochs):
-            misc.save_model(
-                args=args, model=model, model_without_ddp=model_without_ddp,
-                optimizer=optimizer, loss_scaler=loss_scaler, epoch=epoch
-            )
+        if args.output_dir:
+            is_save = False
+            if lowest_vali_loss > val_stats['loss']:
+                lowest_vali_loss = val_stats['loss']
+                lowest_vali_epoch = epoch
+                is_save = True
+            if (epoch + 1) % span == 0 or epoch + 1 == args.epochs:
+                is_save = True
+            if is_save:
+                misc.save_model(
+                    args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
+                    loss_scaler=loss_scaler, epoch=epoch
+                )
 
         # Log stats
         log_stats = {
             **{f'train_{k}': v for k, v in train_stats.items()},
+            **{f'val_{k}': v for k, v in val_stats.items()},
             'epoch': epoch,
         }
 
@@ -316,6 +369,13 @@ def main(args):
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))
+
+    if args.output_dir and misc.is_main_process():
+        with open(os.path.join(args.output_dir, "best.json"), mode="w", encoding="utf-8") as f:
+            f.write(json.dumps({
+                "lowest_vali_epoch": lowest_vali_epoch, 
+                "lowest_vali_loss": lowest_vali_loss,
+            }, indent=4) + "\n")
 
 if __name__ == '__main__':
     args = get_args_parser().parse_args()

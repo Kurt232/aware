@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e  # Exit immediately if a command exits with a non-zero status
 
-ROOT="/data/wjdu/hal/0118"
+ROOT="/data/wjdu/hal/0121"
 MODEL="base"
 SETTING_ID=1
 # FLAG="_${SETTING_ID}"
@@ -37,9 +37,8 @@ CUDA_VISIBLE_DEVICES="$GPUS" torchrun --nproc_per_node=$NNODE --master_port=$MAS
     --stride 16 \
     --dropout 0.1 \
     --prompt_num 10 \
-    --right_prob 0.2 \
-    --min_mask_ratio 0.3 \
-    --max_mask_ratio 0.6 \
+    --min_mask_ratio 0.2 \
+    --max_mask_ratio 0.5 \
     > "$TRAIN_DIR/output.log"
 
 # setting_id 0: no augmentation, 1: 1 round, 2: 2 rounds, 3: 5 rounds
