@@ -159,17 +159,7 @@ def train_one_epoch(model: nn.Module,
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 def main(args):
-    misc.init_distributed_mode(args)
-
-    if args.setting_id == 1:
-        augment_round = 1
-    elif args.setting_id == 2:
-        augment_round = 2
-    elif args.setting_id == 3:
-        augment_round = 5
-    else:
-        augment_round = 0
-    
+    misc.init_distributed_mode(args)    
     print('job dir: {}'.format(os.path.dirname(os.path.realpath(__file__))))
     print("{}".format(args).replace(', ', ',\n'))
 
@@ -193,7 +183,7 @@ def main(args):
         f.write(json.dumps(log_args, indent=4) + "\n")
 
     # Create dataset
-    dataset_train = IMUDataset(args.data_config, augment_round=augment_round, is_train=True)
+    dataset_train = IMUDataset(args.data_config, is_train=True, is_rotated=args.setting_id == 1)
     print(f"train dataset size: {len(dataset_train)}")
 
     # Split into train and validation sets

@@ -95,16 +95,6 @@ def get_args_parser():
 def main(args):
     misc.init_distributed_mode(args)
     # args.distributed = False # debug
-
-    if args.setting_id == 1:
-        augment_round = 1
-    elif args.setting_id == 2:
-        augment_round = 2
-    elif args.setting_id == 3:
-        augment_round = 5
-    else:
-        augment_round = 0
-    
     print('job dir: {}'.format(os.path.dirname(os.path.realpath(__file__))))
     print("{}".format(args).replace(', ', ',\n'))
 
@@ -168,7 +158,7 @@ def main(args):
     loss_scaler = NativeScaler()
 
     # Create the train dataset
-    dataset_train = IMUDataset(args.data_config, augment_round=augment_round, is_train=True)
+    dataset_train = IMUDataset(args.data_config, is_train=True, is_rotated=args.setting_id == 1)
     print(f"train dataset size: {len(dataset_train)}")
 
     # Split the dataset into training, validation (8:2)
