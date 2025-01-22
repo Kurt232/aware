@@ -216,10 +216,9 @@ def evaluate(model: nn.Module,
             sync_location_emb = sync_location_emb.to(device, non_blocking=True)
             
             with torch.cuda.amp.autocast():
-                mask_out, mask_seq = model(imu_input, prior_emb=location_emb, prior_y=sync_location_emb)
-                loss = calculate_reconstruction_loss(sync_input, mask_out, mask_seq)
+                x, y = model(imu_input, prior_emb=location_emb, y=sync_input, prior_y=sync_location_emb)
+                loss = calculate_clip_loss(x, y)
 
-            loss_value = loss.item()
             loss_value = loss.item()
             if not math.isfinite(loss_value):
                     print("Loss is {}, stopping evaluation".format(loss_value))

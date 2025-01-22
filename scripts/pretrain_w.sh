@@ -12,15 +12,15 @@ TRAIN_DIR="${ROOT}/pretrain/${MODEL}${FLAG}${TIMESTAMP}"
 
 mkdir -p "$TRAIN_DIR"
 
-GPUS="1,2,3"
-MASTER_PORT=2433
+GPUS="4,5"
+MASTER_PORT=2533
 NNODE=$(($(echo $GPUS | tr -cd , | wc -c) + 1))
 
 mkdir -p "$TRAIN_DIR"
 
 CUDA_VISIBLE_DEVICES="$GPUS" torchrun --nproc_per_node=$NNODE --master_port=$MASTER_PORT \
     aware_train.py --data_config "$DATA_CONFIG" \
-    --batch_size 1536 \
+    --batch_size 768 \
     --epochs 400 \
     --warmup_epochs 10 \
     --lr 1e-4 \
