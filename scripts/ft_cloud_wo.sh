@@ -8,7 +8,7 @@ SETTING_ID=1
 PHASE="all"
 MARK=""
 
-LOAD_PATH="${ROOT}/pretrain/${MODEL}${MARK}/checkpoint-399.pth"
+LOAD_PATH="${ROOT}/pretrain/${MODEL}${MARK}/checkpoint-199.pth"
 
 MASTER_PORT=$3
 GPUS=$4
@@ -16,11 +16,6 @@ NNODE=$(($(echo $GPUS | tr -cd , | wc -c) + 1))
 
 TASK_LEN=$(ls $CONFIGS/*.yaml | wc -l)
 CURRENT_IDX=0
-
-if [[ "$MODEL" != "base" ]]; then
-    echo "Error: The model must be 'base', not '$MODEL'."
-    exit 1
-fi
 
 for DATA_CONFIG in $CONFIGS/*.yaml; do
     # Increment loop index
@@ -34,10 +29,10 @@ for DATA_CONFIG in $CONFIGS/*.yaml; do
     FLAG=$(basename ${DATA_CONFIG%.yaml})
     TRAIN_DIR="${ROOT}/ft_cloud/${MODEL}${MARK}_${FLAG}"
 
-    if [ -d "$TRAIN_DIR" ]; then
-        echo "$TRAIN_DIR exists, skip"
-        continue
-    fi
+    # if [ -d "$TRAIN_DIR" ]; then
+    #     echo "$TRAIN_DIR exists, skip"
+    #     continue
+    # fi
     
     mkdir -p "$TRAIN_DIR"
 
@@ -49,13 +44,12 @@ for DATA_CONFIG in $CONFIGS/*.yaml; do
         --seed 42 \
         --setting_id $SETTING_ID \
         --phase $PHASE \
-        --d_model 256 \
-        --n_heads 8 \
+        --d_model 128 \
+        --n_heads 4 \
         --e_layers 3 \
-        --patch_len 16 \
-        --stride 16 \
+        --patch_len 8 \
+        --stride 8 \
         --dropout 0.1 \
-        --prompt_num 10 \
         > "$TRAIN_DIR"/output.log
 
     OUTPUT_DIR="${ROOT}/result/ft_cloud/${MODEL}${MARK}_${FLAG}"

@@ -191,7 +191,7 @@ def infer(config_path, model):
             'META': [data_path],
             'LOC': loc
         }
-        dataset = IMUDataset(config, augment_round=0, is_train=False)
+        dataset = IMUDataset(config, is_train=False, is_rotated=False)
         if len(dataset) == 0:
             continue
         predictions = []
@@ -258,7 +258,7 @@ if __name__ == '__main__':
 
     model_args = json.load(open(os.path.join(load_path, 'args.json')))['model_args']
     model_args = UniTSArgs.from_dict(model_args)
-    model = UniTS(enc_in=6, num_class=num_class, args=model_args, is_pretrain=False)
+    model = UniTS(enc_in=6, num_class=num_class, args=model_args)
     if load_file is None:
         record = json.load(open(os.path.join(load_path, 'best.json')))
         if enable_cross:

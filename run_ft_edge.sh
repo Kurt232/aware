@@ -2,15 +2,9 @@
 set -e
 
 ROOT=$1
-GPUS="1"
-# check pretrain is in the root directory
-if [ ! -d "$ROOT/pretrain" ]; then
-    echo "No pretrain directory found in $ROOT"
-    exit 1
-fi
 
-MODELS="w_ae w_clip w_clip_sg"
-MASTER_PORT=6000
+MASTER_PORT=6100
+OFFSET=2
 # Store background process IDs
 pids=()
 
@@ -27,13 +21,18 @@ cleanup() {
 trap cleanup SIGINT
 
 CURRENT_IDX=0
-for model in $MODELS; do
-    echo "Running ft_edge.sh"
-    bash scripts/ft_edge.sh "$ROOT" "$model" $((MASTER_PORT + 10 * $CURRENT_IDX)) $GPUS &
-    # Store the process ID
-    pids+=($!)
-    CURRENT_IDX=$((CURRENT_IDX + 1))
-done
+echo "Running ft_edge.sh"
+GPUS="$(( (CURRENT_IDX + OFFSET) % 8 ))"
+bash scripts/ft_edge.sh "$ROOT" "w_aware" $((MASTER_PORT + 10 * $CURRENT_IDX)) $GPUS &
+# Store the process ID
+pids+=($!)
+CURRENT_IDX=$((CURRENT_IDX + 1))
 
-bash scripts/ft_edge_wo.sh "$ROOT" "base" $((MASTER_PORT + 10 * $CURRENT_IDX)) $GPUS &
+echo "Running ft_edge_wo.sh"
+GPUS="$(( (CURRENT_IDX + OFFSET) % 8 ))"
+bash scripts/ft_edge_wo.sh "$ROOT" "wo_aware" $((MASTER_PORT + 10 * $CURRENT_IDX)) $GPUS &
+# Store the process ID
+pids+=($!)
+CURRENT_IDX=$((CURRENT_IDX + 1))
+
 wait

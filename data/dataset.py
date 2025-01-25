@@ -141,7 +141,7 @@ class IMUSyncDataset(Dataset):
         s_id = sample['subject_id']
         # Find potential sync data
         matches = self.data_list[
-            (self.data_list['offset'] == offset) & 
+            # (self.data_list['offset'] == offset) & 
             (self.data_list['output'] == caption) &
             (self.data_list['subject_id'] == s_id) &
             (self.data_list['data_id'] != data_id) # exclude current data

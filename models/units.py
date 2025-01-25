@@ -315,12 +315,13 @@ class VarAttention(nn.Module):
         B, N, P, C = x.shape
 
         qkv = self.qkv(x).reshape(B, N, P, 3, self.num_heads,
-                                  self.head_dim).permute(3, 0, 2, 4, 1, 5)
-        q, k, v = qkv.unbind(0)
+                                  self.head_dim).permute(3, 0, 2, 4, 1, 5) # [3, B, P, num_heads, N, head_dim]
+        q, k, v = qkv.unbind(0) # [B, P, num_heads, N, head_dim]
         q, k = self.q_norm(q), self.k_norm(k)
 
-        q = q.mean(dim=1, keepdim=False)
-        k = k.mean(dim=1, keepdim=False)
+        q = q.mean(dim=1, keepdim=False) # [B, num_heads, N, head_dim]
+        k = k.mean(dim=1, keepdim=False) # [B, num_heads, N, head_dim]
+        # [B, num_heads, N, head_dim, P] -> [B, num_heads, N, head_dim * P]
         v = v.permute(0, 2, 3, 4, 1).reshape(B, self.num_heads, N, -1)
 
         x = F.scaled_dot_product_attention(
@@ -484,7 +485,6 @@ class BasicBlock(nn.Module):
             drop_path=0.,
             act_layer=nn.GELU,
             norm_layer=nn.LayerNorm,
-            prefix_token_length=0,
     ):
         super().__init__()
         self.seq_att_block = SeqAttBlock(dim=dim, num_heads=num_heads,
@@ -497,15 +497,15 @@ class BasicBlock(nn.Module):
                                          attn_drop=attn_drop, init_values=init_values, proj_drop=proj_drop,
                                          drop_path=drop_path, norm_layer=norm_layer)
 
-        self.dynamic_mlp = MLPBlock(dim=dim, mlp_ratio=mlp_ratio, mlp_layer=DynamicLinearMlp,
+        self.mlp = MLPBlock(dim=dim, mlp_ratio=mlp_ratio, mlp_layer=Mlp,
                                     proj_drop=proj_drop, init_values=init_values, drop_path=drop_path,
                                     act_layer=act_layer, norm_layer=norm_layer,
-                                    prefix_token_length=prefix_token_length)
+                                    )
 
-    def forward(self, x, prefix_seq_len, attn_mask):
+    def forward(self, x, attn_mask):
         x = self.seq_att_block(x, attn_mask)
         x = self.var_att_block(x)
-        x = self.dynamic_mlp(x, prefix_seq_len=prefix_seq_len)
+        x = self.mlp(x)
         return x
 
 
@@ -559,7 +559,7 @@ class CLSHead(nn.Module):
 
 
 class ForecastHead(nn.Module):
-    def __init__(self, d_model, patch_len, stride, pad, head_dropout=0, prefix_token_length=None):
+    def __init__(self, d_model, patch_len, stride, pad, head_dropout=0):
         super().__init__()
         d_mid = d_model
         self.proj_in = nn.Linear(d_model, d_mid)
@@ -573,29 +573,21 @@ class ForecastHead(nn.Module):
         self.pad = pad
         self.patch_len = patch_len
         self.stride = stride
-        self.pos_proj = DynamicLinear(
-            in_features=128, out_features=128, fixed_in=prefix_token_length)
 
-    def forward(self, x_full, pred_len, token_len):
-        x_full = self.proj_in(x_full)
-        x_pred = x_full[:, :, -token_len:]
-        x = x_full.transpose(-1, -2)
-        x = self.pos_proj(x, token_len)
-        x = x.transpose(-1, -2)
-        x = x + x_pred
-        x = self.mlp(x)
-        x = self.proj_out(x)
+    def forward(self, x_full, pred_len):
+        x = self.proj_in(x_full) # [B, V, L, C]
+        x = self.mlp(x) # [B, V, L, C]
+        x = self.proj_out(x) # [B, V, L, patch_len]
 
         bs, n_vars = x.shape[0], x.shape[1]
-        x = x.reshape(-1, x.shape[-2], x.shape[-1])
-        x = x.permute(0, 2, 1)
+        x = x.reshape(-1, x.shape[-2], x.shape[-1]) # [B*V, L, patch_len]
+        x = x.permute(0, 2, 1) # [B*V, patch_len, L]
         x = torch.nn.functional.fold(x, output_size=(
-            pred_len, 1), kernel_size=(self.patch_len, 1), stride=(self.stride, 1))
-        x = x.squeeze(dim=-1)
-        x = x.reshape(bs, n_vars, -1)
-        x = x.permute(0, 2, 1)
+            pred_len, 1), kernel_size=(self.patch_len, 1), stride=(self.stride, 1)) # [B*V, patch_len, pred_len]
+        x = x.squeeze(dim=-1) # [B, V, patch_len, pred_len]
+        x = x.reshape(bs, n_vars, -1) # [B, V, patch_len*pred_len]
+        x = x.permute(0, 2, 1) # [B, patch_len*pred_len, V]
         return x
-
 
 class FeedForward(nn.Module):
     def __init__(
@@ -626,38 +618,92 @@ class AwareLayer(nn.Module):
     def __init__(self, d_clip, d_model, n_head, mlp_ratio=4, dropout=0):
         super().__init__()
         self.prior_proj = nn.Linear(d_clip, d_model, bias=False)
-        self.att = SeqAttention(d_model, n_head, proj_drop=dropout)
+        self.seq_att = SeqAttention(d_model, n_head, proj_drop=dropout)
         self.ffn = FeedForward(dim=d_model, hidden_dim=d_model * mlp_ratio, multiple_of=256)
         self.norm = nn.LayerNorm(d_model)
 
-    def forward(self, x, prior_emb):
-        # Project prior embedding
-        emb = self.prior_proj(prior_emb)  # [B, N, D]
-        n_prior = prior_emb.shape[1]
-
-        # Reshape inputs
+    def forward(self, x, prior_emb=None):
         B, V, L, D = x.shape
-        x = x.view(B*V, L, D)  # [B*V, L, D]
-        
-        # Expand and append prior embedding to sequence
-        emb = emb.unsqueeze(1).repeat(1, V, 1, 1).reshape(B*V, n_prior, D)  # [B*V, N, D]
-        x_with_emb = torch.cat([emb, x], dim=1)  # [B*V, L+N, D]
-        
-        # Apply self-attention
-        x_out = self.att(x_with_emb)  # [B*V, L+N, D]
-        x = x + self.ffn(x)
+        # Project prior embedding
+        if prior_emb is not None:
+            emb = self.prior_proj(prior_emb)  # [B, N, D]
+            n_prior = prior_emb.shape[1]
+            
+            # Expand and append prior embedding to sequence
+            emb = emb.unsqueeze(1).repeat(1, V, 1, 1)
+            x_with_emb = torch.cat([emb, x], dim=2)  # [B, V, L+N, D]
+            
+            # Reshape inputs
+            x_with_emb = x_with_emb.view(B*V, -1, D)  # [B*V, L+N, D]
+            # Apply self-attention
+            x_out = self.seq_att(x_with_emb)  # [B*V, L+N, D]
+            x = x_with_emb + self.ffn(x_out)
+        else:
+            n_prior = 0
+            x = x.view(B*V, L, D)
+            x = self.seq_att(x)
+            x = x + self.ffn(x)
 
         # Split back to original sequence and prior embedding
-        x = x_out[:, n_prior:]  # [B*V, L, D]
+        x = x[:, n_prior:]  # [B*V, L, D]
         x = x.view(B, V, L, D)
         x = self.norm(x)
         return x
 
 
+def calculate_contrast_loss(x, y, temperature=0.07):
+    """
+    Args:
+        x (torch.Tensor): Feature tensor for first modality, cls token, shape [batch_size, d_model]
+        y (torch.Tensor): Feature tensor for second modality, cls token, shape [batch_size, d_model]
+        temperature (float): Temperature parameter for scaling logits
+
+    Returns:
+        torch.Tensor: Scalar CLIP-like contrastive loss
+    """
+    
+    # Normalize features to unit vectors
+    x = F.normalize(x, dim=1)
+    y = F.normalize(y, dim=1)
+    
+    # Compute pairwise similarity: [batch_size, batch_size]
+    logits_xy = torch.matmul(x, y.t()) / temperature
+    
+    # By symmetry, we can reuse the same matrix transposed for the other direction
+    # or simply compute y -> x as well (equivalent to logits_xy.t() if shapes match).
+    logits_yx = logits_xy.t()
+    
+    # Labels: each sample in the batch is the "positive" for itself
+    batch_size = x.size(0)
+    labels = torch.arange(batch_size, device=x.device)
+    
+    # Cross-entropy for x->y
+    loss_xy = F.cross_entropy(logits_xy, labels)
+    # Cross-entropy for y->x
+    loss_yx = F.cross_entropy(logits_yx, labels)
+    
+    # Final CLIP-like loss is the average of the two directions
+    return (loss_xy + loss_yx) / 2
+
+
+def calculate_reconstruct_loss(x_enc, mask_dec_out, mask):
+    """
+    x_enc: Original input tensor [B, L, V]
+    mask_dec_out: Model's predictions [B, L, V]
+    mask_seq: Mask tensor indicating which positions were masked [B, L] (1 for masked positions, 0 otherwise)
+    """
+    loss = (mask_dec_out - x_enc) ** 2 # [B, L, V]
+    loss = loss.mean(dim=-1) # [B, L]
+    if mask is not None:
+        loss = (loss * mask).sum() / mask.sum()
+    else:
+        loss = loss.mean()
+    return loss
+
+
 class UniTS(nn.Module):
     """
     UniTS: Building a Unified Time Series Model
-    prompt_num=10,
     d_model=256, stride=8, 
     patch_len=8, dropout=0.1, 
     e_layers=3, n_heads=8,
@@ -672,28 +718,26 @@ class UniTS(nn.Module):
         super().__init__()
 
         self.task = task
-        if task == 'pretrain' or task == 'aware':
+        if task == 'aware':
             self.min_mask_ratio = args.min_mask_ratio
             self.max_mask_ratio = args.max_mask_ratio
             self.phase = 'all'
         elif task == 'cls':
             self.phase = args.phase
         else:
-            raise ValueError(f"Invalid task: {task}, should be 'pretrain', 'aware', or 'cls'")
+            raise ValueError(f"Invalid task: {task}, should be 'aware', or 'cls'")
 
         # Tokens settings
-        self.prompt_tokens = nn.Parameter(torch.zeros(1, enc_in, args.prompt_num, args.d_model))
-        self.mask_tokens = nn.Parameter(torch.zeros(1, enc_in, 1, args.d_model))
-        self.cls_tokens = nn.Parameter(torch.zeros(1, enc_in, 1, args.d_model))
+        self.mask_token = nn.Parameter(torch.zeros(1, enc_in, 1, args.d_model))
+        self.clip_token = nn.Parameter(torch.zeros(1, enc_in, 1, args.d_model))
+        self.cls_token = nn.Parameter(torch.zeros(1, enc_in, 1, args.d_model))
         self.category_tokens = nn.Parameter(torch.zeros(1, enc_in, num_class, args.d_model))
 
-        nn.init.normal_(self.prompt_tokens, std=0.02)
-        nn.init.normal_(self.mask_tokens, std=0.02)
-        nn.init.normal_(self.cls_tokens, std=0.02)
+        nn.init.normal_(self.clip_token, std=0.02)
+        nn.init.normal_(self.cls_token, std=0.02)
         nn.init.normal_(self.category_tokens, std=0.02)
 
         ### model settings ###
-        self.prompt_num = args.prompt_num
         self.stride = args.stride
         self.pad = args.stride
         self.patch_len = args.patch_len
@@ -702,31 +746,33 @@ class UniTS(nn.Module):
         self.patch_embeddings = PatchEmbedding(
             args.d_model, args.patch_len, args.stride, args.stride, args.dropout)
         self.position_embedding = LearnablePositionalEmbedding(args.d_model)
-        self.prompt2forecat = DynamicLinear(128, 128, fixed_in=args.prompt_num)
 
         # basic blocks
         self.block_num = args.e_layers
         self.blocks = nn.ModuleList(
             [BasicBlock(dim=args.d_model, num_heads=args.n_heads, qkv_bias=False, qk_norm=False,
                         mlp_ratio=8., proj_drop=args.dropout, attn_drop=0., drop_path=0.,
-                        init_values=None, prefix_token_length=args.prompt_num) for l in range(args.e_layers)]
+                        init_values=None) for l in range(args.e_layers)]
         )
 
         # output processing
         self.cls_head = CLSHead(args.d_model, head_dropout=args.dropout)
         self.forecast_head = ForecastHead(
-            args.d_model, args.patch_len, args.stride, args.stride, prefix_token_length=args.prompt_num, head_dropout=args.dropout)
+            args.d_model, args.patch_len, args.stride, args.stride, head_dropout=args.dropout)
 
         # Prior knowledge injection
         d_clip = 512
         self.prior_aware = AwareLayer(d_clip, args.d_model, args.n_heads, dropout=args.dropout)
         
-        if self.phase == 'cls':
+        if self.task != 'aware':
             for name, param in self.named_parameters():
-                if 'cls_head' in name:
-                    param.requires_grad = True
-                else:
+                if 'aware' in name:
                     param.requires_grad = False
+                if self.phase == 'cls':
+                    if 'cls_head' in name:
+                        param.requires_grad = True
+                    else:
+                        param.requires_grad = False
 
     def tokenize(self, x, mask=None):
         x = x.permute(0, 2, 1) # [B, V, L]
@@ -739,43 +785,10 @@ class UniTS(nn.Module):
         x, n_vars = self.patch_embeddings(x)
         return x, n_vars, padding
 
-    def prepare_prompt(self, x, n_vars, prefix_prompt, task_prompt):
-        x = torch.reshape(
-            x, (-1, n_vars, x.shape[-2], x.shape[-1]))
-        # append prompt tokens
-        this_prompt = prefix_prompt.repeat(x.shape[0], 1, 1, 1)
-
-        this_function_prompt = task_prompt.repeat(x.shape[0], 1, 1, 1)
-        x = x + self.position_embedding(x)
-        x = torch.cat((this_prompt, x, this_function_prompt), dim=2)
-
-        return x
-
-    def backbone(self, x, prefix_len, seq_len):
+    def backbone(self, x):
         attn_mask = None
         for block in self.blocks:
-            x = block(x, prefix_seq_len=prefix_len +
-                      seq_len, attn_mask=attn_mask)
-        return x
-
-    def classification(self, x, prior_emb=None, return_feature=False):
-        prefix_prompt = self.prompt_tokens
-        task_prompt = self.cls_tokens
-        category_token = self.category_tokens
-
-        x, n_vars, _ = self.tokenize(x) # [B, V, L, C]
-
-        seq_len = x.shape[-2]
-
-        x = self.prepare_prompt(
-            x, n_vars, prefix_prompt, task_prompt)
-
-        x = self.backbone(x, prefix_prompt.shape[2], seq_len)
-        if prior_emb is not None:
-            x = self.prior_aware(x, prior_emb)
-            
-        x = self.cls_head(x, category_token, return_feature=return_feature)
-
+            x = block(x, attn_mask=attn_mask)
         return x
 
     def random_masking(self, x, min_mask_ratio, max_mask_ratio):
@@ -807,23 +820,7 @@ class UniTS(nn.Module):
         mask = torch.gather(mask, dim=1, index=ids_restore)
         mask = mask.float()
 
-        return mask
-
-    def right_masking(self, x, min_mask_ratio, max_mask_ratio):
-        N, V, L, D = x.shape  # batch, var, length, dim
-
-        # Randomly choose a mask ratio for each sample within the specified range
-        mask_ratios = torch.rand(N, device=x.device) * \
-            (max_mask_ratio - min_mask_ratio) + min_mask_ratio
-        len_keeps = (L * (1 - mask_ratios)).long()
-
-        # Binary mask creation without a for loop
-        len_keeps_matrix = len_keeps.unsqueeze(1).expand(N, L)
-        indices = torch.arange(L, device=x.device).expand_as(len_keeps_matrix)
-        mask = indices >= len_keeps_matrix
-        mask = mask.float()
-
-        return mask
+        return mask # [B, L]
 
     def get_mask_seq(self, mask, seq_len):
         mask_seq = mask.unsqueeze(dim=-1).repeat(1, 1, self.patch_len)
@@ -836,93 +833,101 @@ class UniTS(nn.Module):
         mask_seq = (mask_seq > 0).float()
         mask_seq = mask_seq.squeeze(dim=-1).squeeze(dim=1)
         return mask_seq
+    
+    def reconstruct(self, x, seqs, prior_emb=None, is_mask=True, lambda_recon=1.0):
+        """
+        aim to reconstruct the input x with context prior
+        """
+        # x: [B, V, L, C]
+        x_cls_prompt = self.cls_token.repeat(x.shape[0], 1, 1, 1)
+        mask_token = self.mask_token
 
-    def pretraining(self, x, prior_emb=None):
-        prefix_prompt = self.prompt_tokens
-        mask_token = self.mask_tokens
-        cls_token = self.cls_tokens
+        seq, seq_len, padding = seqs
 
+        # mask
+        if is_mask:
+            mask = self.random_masking(x, self.min_mask_ratio, self.max_mask_ratio) # [B, L']
+            mask_repeat = mask.unsqueeze(dim=1).unsqueeze(dim=-1) # [B, 1, L', 1]
+            mask_repeat = mask_repeat.repeat(1, x.shape[1], 1, x.shape[-1]) # [B, V, L', C]
+            x = x * (1-mask_repeat) + mask_token * mask_repeat # removed token is 0
+
+            mask_seq = self.get_mask_seq(mask, seq_len+padding)
+            mask_seq = mask_seq[:, :seq_len]
+        else:
+            mask_seq = None
+        
+        x = torch.cat((x, x_cls_prompt), dim=2)
+        x = self.prior_aware(x, prior_emb) # [B, V, L, C]
+
+        mask_dec_out = self.forecast_head(x[:, :, :-x_cls_prompt.shape[2]], seq_len+padding)
+        mask_dec_out = mask_dec_out[:, :seq_len] # [B, L, V]
+
+        r_loss = lambda_recon * calculate_reconstruct_loss(seq, mask_dec_out, mask_seq)
+        return r_loss
+
+    def contrast(self, x, y, temperature):
+        """
+        contrastive learning
+        aim to reduce the gap between x and y
+        """
+        x_clip_prompt = self.clip_token.repeat(x.shape[0], 1, 1, 1)
+
+        x = torch.cat((x, x_clip_prompt), dim=2)
+        x = self.backbone(x) # [B, V, L, C]
+        x_clip_token = x[:, :, -1, :].mean(1) # [B, C]
+
+        # stop gradient
+        # with torch.no_grad():
+        y_clip_prompt = self.clip_token.repeat(y.shape[0], 1, 1, 1)
+        y = torch.cat((y, y_clip_prompt), dim=2)
+        y = self.backbone(y) # [B, V, L, C]
+        y_clip_token = y[:, :, -1, :].mean(1) # [B, C]
+
+        c_loss = calculate_contrast_loss(x_clip_token, y_clip_token, temperature)
+
+        # remove the prefix_prompt and cls_token
+        x = x[:, :, :-x_clip_prompt.shape[2], :]
+        return x, x_clip_token, c_loss
+    
+    def classify(self, x, prior_emb=None):
+        x_clip_prompt = self.clip_token.repeat(x.shape[0], 1, 1, 1)
+        x_cls_prompt = self.cls_token.repeat(x.shape[0], 1, 1, 1)
+        category_token = self.category_tokens.repeat(x.shape[0], 1, 1, 1)
+
+        x = torch.cat((x, x_clip_prompt), dim=2)
+        x = self.backbone(x) # [B, V, L, C]
+        x = x[:, :, :-x_clip_prompt.shape[2], :] # remove the clip_prompt
+
+        x = torch.cat((x, x_cls_prompt), dim=2)
+        x = self.prior_aware(x, prior_emb) # [B, V, L, C]
+        out = self.cls_head(x, category_token)
+
+        return out
+    
+    def forward(self, x, prior_emb=None, y=None, is_mask=True, lambda_recon=1.0, temperature=0.07):
+        # x: [B, L, V]
         seq_len = x.shape[1]
-        x, n_vars, padding = self.tokenize(x)
-        seq_token_len = x.shape[-2]
+        seq_src = x.detach().clone()
 
-        # append prompt tokens
-        x = torch.reshape(
-            x, (-1, n_vars, x.shape[-2], x.shape[-1]))
-        # prepare prompts
-        this_prompt = prefix_prompt.repeat(x.shape[0], 1, 1, 1)
-
-        # mask 
-        mask = self.random_masking(x, self.min_mask_ratio, self.max_mask_ratio)
-        mask_repeat = mask.unsqueeze(dim=1).unsqueeze(dim=-1)
-        mask_repeat = mask_repeat.repeat(1, x.shape[1], 1, x.shape[-1])
-        x = x * (1-mask_repeat) + mask_token * mask_repeat  # todo
-
-        init_full_input = torch.cat((this_prompt, x), dim=-2)
-        init_mask_prompt = self.prompt2forecat(
-            init_full_input.transpose(-1, -2), x.shape[2]).transpose(-1, -2)
-        # keep the unmasked tokens and fill the masked ones with init_mask_prompt.
-        x = x * (1-mask_repeat) + init_mask_prompt * mask_repeat
+        x, n_vars, pad = self.tokenize(x) # [B*V, L, C]
+        x = torch.reshape(x, (-1, n_vars, x.shape[-2], x.shape[-1])) # [B, V, L, C]
         x = x + self.position_embedding(x)
 
-        mask_seq = self.get_mask_seq(mask, seq_len+padding)
-        mask_seq = mask_seq[:, :seq_len]
-        x = torch.cat((this_prompt, x), dim=2)
-
-        x = self.backbone(x, prefix_prompt.shape[2], seq_token_len)
-
-        if prior_emb is not None:
-            x = self.prior_aware(x, prior_emb)
-        
-        mask_dec_out = self.forecast_head(
-            x[:, :, :-1], seq_len+padding, seq_token_len)
-        mask_dec_out = mask_dec_out[:, :seq_len]
-
-        return mask_dec_out, mask_seq
-
-    def aware(self, x, prior_x, y, prior_y):
-        # contrastive learning
-        # aim to reduce the gap between x and y
-        prefix_prompt = self.prompt_tokens
-        task_prompt = self.cls_tokens
-
-        x, n_vars, _ = self.tokenize(x) # [B, V, L, C]
-
-        seq_len = x.shape[-2]
-
-        x = self.prepare_prompt(
-            x, n_vars, prefix_prompt, task_prompt)
-
-        x = self.backbone(x, prefix_prompt.shape[2], seq_len)
-        x = self.prior_aware(x, prior_x) # [B, V, L, C]
-        
-        x = self.cls_head(x, return_feature=True) # [B, V, 1, C]
-        x = x.mean(dim=1).squeeze(dim=1) # [B, C]
-
-        y, n_vars, _ = self.tokenize(y)
-        seq_len = y.shape[-2]
-
-        y = self.prepare_prompt(
-            y, n_vars, prefix_prompt, task_prompt)
-
-        y = self.backbone(y, prefix_prompt.shape[2], seq_len)
-        y = self.prior_aware(y, prior_y) # [B, V, L, C]
-
-        y = self.cls_head(y, return_feature=True) # [B, V, 1, C]
-        y = y.mean(dim=1).squeeze(dim=1) # [B, C]
-
-        return x, y
-        
-    def forward(self, x, prior_emb=None, y=None, prior_y=None):
-        if self.task == 'pretrain':
-            dec_out, mask_seq = self.pretraining(x, prior_emb)
-            return dec_out, mask_seq
+        if self.task == 'cls':
+            return self.classify(x, prior_emb)
         elif self.task == 'aware':
-            x, y = self.aware(x, prior_emb, y, prior_y)
-            return x, y
-        else:
-            dec_out = self.classification(x, prior_emb)
-            return dec_out  # [B, N]
+            seq = (seq_src, seq_len, pad)
+
+            # with torch.no_grad():
+            y, n_vars, _ = self.tokenize(y)
+            y = torch.reshape(y, (-1, n_vars, y.shape[-2], y.shape[-1])) # [B, V, L, C]
+            y = y + self.position_embedding(y)
+            
+            x, x_cls_token, c_loss = self.contrast(x, y, temperature)
+
+            r_loss = self.reconstruct(x, seq, prior_emb, is_mask, lambda_recon)
+
+            return (c_loss+r_loss, c_loss, r_loss)
 
 @dataclass
 class UniTSArgs:
@@ -932,7 +937,6 @@ class UniTSArgs:
     patch_len: int
     stride: int
     dropout: float
-    prompt_num: int
     phase: str
     load_path: str = None
     # pretrain

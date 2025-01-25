@@ -39,7 +39,6 @@ def get_args_parser():
     parser.add_argument('--patch_len', default=8, type=int)
     parser.add_argument('--stride', default=8, type=int)
     parser.add_argument('--dropout', default=0.1, type=float)
-    parser.add_argument('--prompt_num', default=10, type=int)
     parser.add_argument('--phase', default='all', type=str, help='all, cls')
 
     # Optimizer parameters

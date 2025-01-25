@@ -4,20 +4,15 @@ set -e  # Exit immediately if a command exits with a non-zero status
 ROOT=$1
 CONFIGS=data/ft_edge
 MODEL=$2
-SETTING_ID=1
+SETTING_ID=0
 PHASE="all"
 MARK=""
 
-LOAD_PATH="${ROOT}/pretrain/${MODEL}${MARK}/checkpoint-399.pth"
+LOAD_PATH="${ROOT}/pretrain/${MODEL}${MARK}/checkpoint-199.pth"
 
 MASTER_PORT=$3
 GPUS=$4
 NNODE=$(($(echo $GPUS | tr -cd , | wc -c) + 1))
-
-if [[ "$MODEL" != "base" ]]; then
-    echo "Error: The third argument must be 'base', not '$MODEL'."
-    exit 1
-fi
 
 for DATA_CONFIGS in $CONFIGS/*; do
     # Increment loop index
@@ -42,9 +37,9 @@ for DATA_CONFIGS in $CONFIGS/*; do
         TRAIN_DIR="${ROOT}/ft_edge/${MODEL}${MARK}_${DATA_FLAG}/${MODEL}_${FLAG}"
 
         # if exists TRAIN_DIR, skip
-        if [ -d "$TRAIN_DIR" ]; then
-            continue
-        fi
+        # if [ -d "$TRAIN_DIR" ]; then
+        #     continue
+        # fi
         
         mkdir -p "$TRAIN_DIR"
 
@@ -60,13 +55,12 @@ for DATA_CONFIGS in $CONFIGS/*; do
             --seed 42 \
             --setting_id $SETTING_ID \
             --phase $PHASE \
-            --d_model 256 \
-            --n_heads 8 \
+            --d_model 128 \
+            --n_heads 4 \
             --e_layers 3 \
-            --patch_len 16 \
-            --stride 16 \
+            --patch_len 8 \
+            --stride 8 \
             --dropout 0.1 \
-            --prompt_num 10 \
             > "$TRAIN_DIR"/output.log
         
         OUTPUT_DIR="${ROOT}/result/ft_edge/${MODEL}${MARK}_${DATA_FLAG}/${MODEL}_${FLAG}"

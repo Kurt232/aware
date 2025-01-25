@@ -35,11 +35,13 @@ def get_args_parser():
     parser.add_argument('--patch_len', default=8, type=int)
     parser.add_argument('--stride', default=8, type=int)
     parser.add_argument('--dropout', default=0.1, type=float)
-    parser.add_argument('--prompt_num', default=10, type=int)
     
     # Pretrain parameters
-    parser.add_argument('--min_mask_ratio', default=0.7, type=float)
-    parser.add_argument('--max_mask_ratio', default=0.8, type=float)
+    parser.add_argument('--min_mask_ratio', default=0.2, type=float)
+    parser.add_argument('--max_mask_ratio', default=0.4, type=float)
+    parser.add_argument('--lambda_recon', default=0.5, type=float)
+    parser.add_argument('--temperature', default=0.1, type=float)
+    parser.add_argument('--is_masked', action='store_true', help='masked reconstruction')
 
     # Optimizer parameters
     parser.add_argument('--weight_decay', type=float, default=0.05)
@@ -80,65 +82,7 @@ def get_args_parser():
     parser.set_defaults(enable_aware=False)
     return parser
 
-# def calculate_contrastive_loss(x, y, temperature=0.1):
-#     """
-#     x: Final feature tensor for first augmented view [batch_size, d_model]
-#     y: Final feature tensor for second augmented view [batch_size, d_model]
-#     temperature: Temperature parameter for scaling logits
-#     """
-#     # Normalize the features
-#     x = F.normalize(x, dim=1)
-#     y = F.normalize(y, dim=1)
-    
-#     # Compute similarity matrix between positive pairs
-#     batch_size = x.size(0)
-#     labels = torch.arange(batch_size, device=x.device)
-    
-#     # Compute logits
-#     logits_xy = torch.matmul(x, y.t()) / temperature
-#     logits_yx = torch.matmul(y, x.t()) / temperature
-    
-#     # Compute loss for both directions
-#     loss_x = F.cross_entropy(logits_xy, labels)
-#     loss_y = F.cross_entropy(logits_yx, labels)
-    
-#     return (loss_x + loss_y) / 2
-
-def calculate_clip_loss(x, y, temperature=0.07):
-    """
-    Args:
-        x (torch.Tensor): Feature tensor for first modality, cls token, shape [batch_size, d_model]
-        y (torch.Tensor): Feature tensor for second modality, cls token, shape [batch_size, d_model]
-        temperature (float): Temperature parameter for scaling logits
-
-    Returns:
-        torch.Tensor: Scalar CLIP-like contrastive loss
-    """
-    
-    # Normalize features to unit vectors
-    x = F.normalize(x, dim=1)
-    y = F.normalize(y, dim=1)
-    
-    # Compute pairwise similarity: [batch_size, batch_size]
-    logits_xy = torch.matmul(x, y.t()) / temperature
-    
-    # By symmetry, we can reuse the same matrix transposed for the other direction
-    # or simply compute y -> x as well (equivalent to logits_xy.t() if shapes match).
-    logits_yx = logits_xy.t()
-    
-    # Labels: each sample in the batch is the "positive" for itself
-    batch_size = x.size(0)
-    labels = torch.arange(batch_size, device=x.device)
-    
-    # Cross-entropy for x->y
-    loss_xy = F.cross_entropy(logits_xy, labels)
-    # Cross-entropy for y->x
-    loss_yx = F.cross_entropy(logits_yx, labels)
-    
-    # Final CLIP-like loss is the average of the two directions
-    return (loss_xy + loss_yx) / 2
-
-def train_one_epoch(model: nn.Module,
+def train_one_epoch(model: UniTS,
                     data_loader: Iterable, 
                     optimizer: torch.optim.Optimizer,
                     device: torch.device, 
@@ -156,20 +100,25 @@ def train_one_epoch(model: nn.Module,
 
     optimizer.zero_grad()
 
-    for data_iter_step, (_, imu_input, location_emb, _, sync_input, sync_location_emb) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
+    for data_iter_step, (_, imu_input, location_emb, _, sync_input, _) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
         if data_iter_step % accum_iter == 0:
             lr_sched.adjust_learning_rate(optimizer, data_iter_step / len(data_loader) + epoch, args)
 
         imu_input = imu_input.to(device, non_blocking=True)
         sync_input = sync_input.to(device, non_blocking=True)
-        location_emb = location_emb.to(device, non_blocking=True)
-        sync_location_emb = sync_location_emb.to(device, non_blocking=True)
+        if args.enable_aware:
+            location_emb = location_emb.to(device, non_blocking=True)
+        else:
+            location_emb = None
         
         with torch.cuda.amp.autocast():
-            x, y = model(imu_input, prior_emb=location_emb, y=sync_input, prior_y=sync_location_emb)
-            loss = calculate_clip_loss(x, y)
+            loss, c_loss, r_loss = model(imu_input, prior_emb=location_emb, y=sync_input, 
+                                is_mask=args.is_masked, lambda_recon = args.lambda_recon,
+                                temperature=args.temperature)
 
         loss_value = loss.item()
+        c_loss_value = c_loss.item()
+        r_loss_value = r_loss.item()
 
         if not math.isfinite(loss_value):
             print("Loss is {}, stopping training".format(loss_value))
@@ -185,13 +134,10 @@ def train_one_epoch(model: nn.Module,
         torch.cuda.synchronize()
 
         metric_logger.update(loss=loss_value)
+        metric_logger.update(c_loss=c_loss_value)
+        metric_logger.update(r_loss=r_loss_value)
         lr = optimizer.param_groups[0]["lr"]
         metric_logger.update(lr=lr)
-
-        # if log_writer is not None and (data_iter_step + 1) % accum_iter == 0:
-        #     epoch_1000x = int((data_iter_step / len(data_loader) + epoch) * 1000)
-        #     log_writer.add_scalar('train_loss', loss_value, epoch_1000x)
-        #     log_writer.add_scalar('lr', lr, epoch_1000x)
 
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
@@ -212,19 +158,26 @@ def evaluate(model: nn.Module,
         for _, imu_input, location_emb, _, sync_input, sync_location_emb in metric_logger.log_every(data_loader, print_freq, header):
             imu_input = imu_input.to(device, non_blocking=True)
             sync_input = sync_input.to(device, non_blocking=True)
-            location_emb = location_emb.to(device, non_blocking=True)
-            sync_location_emb = sync_location_emb.to(device, non_blocking=True)
+            if args.enable_aware:
+                location_emb = location_emb.to(device, non_blocking=True)
+            else:
+                location_emb = None
             
             with torch.cuda.amp.autocast():
-                x, y = model(imu_input, prior_emb=location_emb, y=sync_input, prior_y=sync_location_emb)
-                loss = calculate_clip_loss(x, y)
+                loss, c_loss, r_loss = model.forward(imu_input, prior_emb=location_emb, y=sync_input, 
+                                is_mask=args.is_masked, lambda_recon = args.lambda_recon,
+                                temperature=args.temperature)
 
             loss_value = loss.item()
+            c_loss_value = c_loss.item()
+            r_loss_value = r_loss.item()
             if not math.isfinite(loss_value):
                     print("Loss is {}, stopping evaluation".format(loss_value))
                     sys.exit(1)
         
             metric_logger.update(loss=loss_value)
+            metric_logger.update(c_loss=c_loss_value)
+            metric_logger.update(r_loss=r_loss_value)
 
     metric_logger.synchronize_between_processes()
     print("Averaged stats for Vali:", metric_logger)
