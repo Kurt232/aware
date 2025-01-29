@@ -64,7 +64,6 @@ class CrossAttention(nn.Module):
             attn_drop=0.,
             proj_drop=0.,
             norm_layer=nn.LayerNorm,
-            var_num=None,
     ):
         super().__init__()
         assert dim % num_heads == 0, 'dim should be divisible by num_heads'
@@ -79,25 +78,13 @@ class CrossAttention(nn.Module):
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
-        if var_num is not None:
-            self.template = nn.Parameter(
-                torch.zeros(var_num, dim), requires_grad=True)
-            torch.nn.init.normal_(self.template, std=.02)
-        self.var_num = var_num
 
-    def forward(self, x, query=None):
+    def forward(self, x, query):
         B, N, C = x.shape
-        if query is not None:
-            q = self.q(query).reshape(
-                B, query.shape[1], self.num_heads, self.head_dim).permute(0, 2, 1, 3)
-            q = self.q_norm(q)
-            var_num = query.shape[1]
-        else:
-            q = self.q(self.template).reshape(1, self.var_num,
-                                              self.num_heads, self.head_dim).permute(0, 2, 1, 3)
-            q = self.q_norm(q)
-            q = q.repeat(B, 1, 1, 1)
-            var_num = self.var_num
+        q = self.q(query).reshape(
+            B, query.shape[1], self.num_heads, self.head_dim).permute(0, 2, 1, 3)
+        q = self.q_norm(q)
+        var_num = query.shape[1]
         kv = self.kv(x).reshape(B, N, 2, self.num_heads,
                                 self.head_dim).permute(2, 0, 3, 1, 4)
         k, v = kv.unbind(0)
@@ -426,6 +413,39 @@ class VarAttBlock(nn.Module):
         return x
 
 
+class CtxAttBlock(nn.Module):
+    def __init__(self,
+            dim,
+            num_heads=8,
+            qkv_bias=False,
+            qk_norm=False,
+            attn_drop=0.,
+            proj_drop=0.,
+            norm_layer=nn.LayerNorm,
+    ):
+        super().__init__()
+        self.norm1 = norm_layer(dim)
+        self.cross_attn = CrossAttention(
+            dim,
+            num_heads,
+            qkv_bias,
+            qk_norm,
+            attn_drop=attn_drop,
+            proj_drop=proj_drop,
+            norm_layer=norm_layer,
+        )
+    
+    def forward(self, x, ctx):
+        B, V, L, C = x.shape
+        x = x.view(-1, L, C) # [B*V, L, C]
+        ctx = ctx.unsqueeze(1) # [B, 1, N, C]
+        ctx = ctx.repeat(1, V, 1, 1).view(-1, ctx.shape[-2], ctx.shape[-1]) # [B*V, N, C]
+        cross_att_out = self.cross_attn(ctx, x) # [B*V, L, C]
+        x = x + cross_att_out
+        x = x.view(B, V, L, C)
+        return self.norm1(x)
+
+
 class MLPBlock(nn.Module):
 
     def __init__(
@@ -497,14 +517,20 @@ class BasicBlock(nn.Module):
                                          attn_drop=attn_drop, init_values=init_values, proj_drop=proj_drop,
                                          drop_path=drop_path, norm_layer=norm_layer)
 
+        self.ctx_att_block = CtxAttBlock(dim=dim, num_heads=num_heads,
+                                         attn_drop=attn_drop, proj_drop=proj_drop,
+                                         norm_layer=norm_layer)
+
         self.mlp = MLPBlock(dim=dim, mlp_ratio=mlp_ratio, mlp_layer=Mlp,
                                     proj_drop=proj_drop, init_values=init_values, drop_path=drop_path,
                                     act_layer=act_layer, norm_layer=norm_layer,
                                     )
 
-    def forward(self, x, attn_mask):
-        x = self.seq_att_block(x, attn_mask)
+    def forward(self, x, ctx=None):
+        x = self.seq_att_block(x, attn_mask=None)
         x = self.var_att_block(x)
+        if ctx is not None:
+            x = self.ctx_att_block(x, ctx)
         x = self.mlp(x)
         return x
 
@@ -558,149 +584,6 @@ class CLSHead(nn.Module):
         return distance
 
 
-class ForecastHead(nn.Module):
-    def __init__(self, d_model, patch_len, stride, pad, head_dropout=0):
-        super().__init__()
-        d_mid = d_model
-        self.proj_in = nn.Linear(d_model, d_mid)
-        self.mlp = Mlp(
-            in_features=d_model,
-            hidden_features=int(d_model * 4),
-            act_layer=nn.GELU,
-            drop=head_dropout,
-        )
-        self.proj_out = nn.Linear(d_model, patch_len)
-        self.pad = pad
-        self.patch_len = patch_len
-        self.stride = stride
-
-    def forward(self, x_full, pred_len):
-        x = self.proj_in(x_full) # [B, V, L, C]
-        x = self.mlp(x) # [B, V, L, C]
-        x = self.proj_out(x) # [B, V, L, patch_len]
-
-        bs, n_vars = x.shape[0], x.shape[1]
-        x = x.reshape(-1, x.shape[-2], x.shape[-1]) # [B*V, L, patch_len]
-        x = x.permute(0, 2, 1) # [B*V, patch_len, L]
-        x = torch.nn.functional.fold(x, output_size=(
-            pred_len, 1), kernel_size=(self.patch_len, 1), stride=(self.stride, 1)) # [B*V, patch_len, pred_len]
-        x = x.squeeze(dim=-1) # [B, V, patch_len, pred_len]
-        x = x.reshape(bs, n_vars, -1) # [B, V, patch_len*pred_len]
-        x = x.permute(0, 2, 1) # [B, patch_len*pred_len, V]
-        return x
-
-class FeedForward(nn.Module):
-    def __init__(
-        self,
-        dim: int, # 256
-        hidden_dim: int, # 256 * 4
-        multiple_of: int, # 256
-    ):
-        super().__init__()
-        hidden_dim = int(2 * hidden_dim / 3) # 256 * 4 * 2 / 3 = 682
-        hidden_dim = multiple_of * ((hidden_dim + multiple_of - 1) // multiple_of) # 256 * ((682 + 256 - 1) // 256) = 768
-
-        self.w1 = nn.Linear(
-            dim, hidden_dim, bias=False,
-        )
-        self.w2 = nn.Linear(
-            hidden_dim, dim, bias=False,
-        )
-        self.w3 = nn.Linear(
-            dim, hidden_dim, bias=False,
-        )
-
-    def forward(self, x):
-        return self.w2(F.silu(self.w1(x)) * self.w3(x))
-
-
-class AwareLayer(nn.Module):
-    def __init__(self, d_clip, d_model, n_head, mlp_ratio=4, dropout=0):
-        super().__init__()
-        self.prior_proj = nn.Linear(d_clip, d_model, bias=False)
-        self.seq_att = SeqAttention(d_model, n_head, proj_drop=dropout)
-        self.ffn = FeedForward(dim=d_model, hidden_dim=d_model * mlp_ratio, multiple_of=256)
-        self.norm = nn.LayerNorm(d_model)
-
-    def forward(self, x, prior_emb=None):
-        B, V, L, D = x.shape
-        # Project prior embedding
-        if prior_emb is not None:
-            emb = self.prior_proj(prior_emb)  # [B, N, D]
-            n_prior = prior_emb.shape[1]
-            
-            # Expand and append prior embedding to sequence
-            emb = emb.unsqueeze(1).repeat(1, V, 1, 1)
-            x_with_emb = torch.cat([emb, x], dim=2)  # [B, V, L+N, D]
-            
-            # Reshape inputs
-            x_with_emb = x_with_emb.view(B*V, -1, D)  # [B*V, L+N, D]
-            # Apply self-attention
-            x_out = self.seq_att(x_with_emb)  # [B*V, L+N, D]
-            x = x_with_emb + self.ffn(x_out)
-        else:
-            n_prior = 0
-            x = x.view(B*V, L, D)
-            x = self.seq_att(x)
-            x = x + self.ffn(x)
-
-        # Split back to original sequence and prior embedding
-        x = x[:, n_prior:]  # [B*V, L, D]
-        x = x.view(B, V, L, D)
-        x = self.norm(x)
-        return x
-
-
-def calculate_contrast_loss(x, y, temperature=0.07):
-    """
-    Args:
-        x (torch.Tensor): Feature tensor for first modality, cls token, shape [batch_size, d_model]
-        y (torch.Tensor): Feature tensor for second modality, cls token, shape [batch_size, d_model]
-        temperature (float): Temperature parameter for scaling logits
-
-    Returns:
-        torch.Tensor: Scalar CLIP-like contrastive loss
-    """
-    
-    # Normalize features to unit vectors
-    x = F.normalize(x, dim=1)
-    y = F.normalize(y, dim=1)
-    
-    # Compute pairwise similarity: [batch_size, batch_size]
-    logits_xy = torch.matmul(x, y.t()) / temperature
-    
-    # By symmetry, we can reuse the same matrix transposed for the other direction
-    # or simply compute y -> x as well (equivalent to logits_xy.t() if shapes match).
-    logits_yx = logits_xy.t()
-    
-    # Labels: each sample in the batch is the "positive" for itself
-    batch_size = x.size(0)
-    labels = torch.arange(batch_size, device=x.device)
-    
-    # Cross-entropy for x->y
-    loss_xy = F.cross_entropy(logits_xy, labels)
-    # Cross-entropy for y->x
-    loss_yx = F.cross_entropy(logits_yx, labels)
-    
-    # Final CLIP-like loss is the average of the two directions
-    return (loss_xy + loss_yx) / 2
-
-
-def calculate_reconstruct_loss(x_enc, mask_dec_out, mask):
-    """
-    x_enc: Original input tensor [B, L, V]
-    mask_dec_out: Model's predictions [B, L, V]
-    mask_seq: Mask tensor indicating which positions were masked [B, L] (1 for masked positions, 0 otherwise)
-    """
-    loss = (mask_dec_out - x_enc) ** 2 # [B, L, V]
-    loss = loss.mean(dim=-1) # [B, L]
-    if mask is not None:
-        loss = (loss * mask).sum() / mask.sum()
-    else:
-        loss = loss.mean()
-    return loss
-
-
 class UniTS(nn.Module):
     """
     UniTS: Building a Unified Time Series Model
@@ -718,14 +601,7 @@ class UniTS(nn.Module):
         super().__init__()
 
         self.task = task
-        if task == 'aware':
-            self.min_mask_ratio = args.min_mask_ratio
-            self.max_mask_ratio = args.max_mask_ratio
-            self.phase = 'all'
-        elif task == 'cls':
-            self.phase = args.phase
-        else:
-            raise ValueError(f"Invalid task: {task}, should be 'aware', or 'cls'")
+        self.phase = args.phase
 
         # Tokens settings
         self.mask_token = nn.Parameter(torch.zeros(1, enc_in, 1, args.d_model))
@@ -757,22 +633,20 @@ class UniTS(nn.Module):
 
         # output processing
         self.cls_head = CLSHead(args.d_model, head_dropout=args.dropout)
-        self.forecast_head = ForecastHead(
-            args.d_model, args.patch_len, args.stride, args.stride, head_dropout=args.dropout)
 
         # Prior knowledge injection
         d_clip = 512
-        self.prior_aware = AwareLayer(d_clip, args.d_model, args.n_heads, dropout=args.dropout)
+        self.ctx_proj = nn.Linear(d_clip, args.d_model)
         
-        if self.task != 'aware':
-            for name, param in self.named_parameters():
-                if 'aware' in name:
-                    param.requires_grad = False
-                if self.phase == 'cls':
-                    if 'cls_head' in name:
-                        param.requires_grad = True
-                    else:
-                        param.requires_grad = False
+        # if self.task != 'aware':
+        #     for name, param in self.named_parameters():
+        #         if 'ctx' in name:
+        #             param.requires_grad = False
+        #         if self.phase == 'cls':
+        #             if 'cls_head' in name:
+        #                 param.requires_grad = True
+        #             else:
+        #                 param.requires_grad = False
 
     def tokenize(self, x, mask=None):
         x = x.permute(0, 2, 1) # [B, V, L]
@@ -785,149 +659,32 @@ class UniTS(nn.Module):
         x, n_vars = self.patch_embeddings(x)
         return x, n_vars, padding
 
-    def backbone(self, x):
+    def backbone(self, x, prior_emb=None):
         attn_mask = None
         for block in self.blocks:
-            x = block(x, attn_mask=attn_mask)
+            x = block(x, prior_emb)
         return x
-
-    def random_masking(self, x, min_mask_ratio, max_mask_ratio):
-        """
-        Perform per-sample random masking.
-        """
-        N, V, L, D = x.shape  # batch, var, length, dim
-
-        # Calculate mask ratios and lengths to keep for each sample in the batch
-        mask_ratios = torch.rand(N, device=x.device) * \
-            (max_mask_ratio - min_mask_ratio) + min_mask_ratio
-        len_keeps = (L * (1 - mask_ratios)).long()
-
-        noise = torch.rand(N, L, device=x.device)  # noise in [0, 1]
-
-        # sort noise for each sample
-        # ascend: small is keep, large is remove
-        ids_shuffle = torch.argsort(noise, dim=1)
-        ids_restore = torch.argsort(ids_shuffle, dim=1)
-
-        # generate the binary mask: 0 is keep, 1 is remove
-        mask = torch.ones([N, L], device=x.device)
-
-        # Create a range tensor and compare with len_keeps for mask generation
-        range_tensor = torch.arange(L, device=x.device).expand(N, L)
-        mask = (range_tensor >= len_keeps.unsqueeze(1))
-
-        # unshuffle to get the binary mask
-        mask = torch.gather(mask, dim=1, index=ids_restore)
-        mask = mask.float()
-
-        return mask # [B, L]
-
-    def get_mask_seq(self, mask, seq_len):
-        mask_seq = mask.unsqueeze(dim=-1).repeat(1, 1, self.patch_len)
-        mask_seq = mask_seq.permute(0, 2, 1)
-        mask_seq = mask_seq.masked_fill(mask_seq == 0, -1e9)
-        # Fold operation
-        mask_seq = torch.nn.functional.fold(mask_seq, output_size=(
-            seq_len, 1), kernel_size=(self.patch_len, 1), stride=(self.stride, 1))
-        # Apply threshold to bring back to 0/1 values
-        mask_seq = (mask_seq > 0).float()
-        mask_seq = mask_seq.squeeze(dim=-1).squeeze(dim=1)
-        return mask_seq
-    
-    def reconstruct(self, x, seqs, prior_emb=None, is_mask=True, lambda_recon=1.0):
-        """
-        aim to reconstruct the input x with context prior
-        """
-        # x: [B, V, L, C]
-        x_cls_prompt = self.cls_token.repeat(x.shape[0], 1, 1, 1)
-        mask_token = self.mask_token
-
-        seq, seq_len, padding = seqs
-
-        # mask
-        if is_mask:
-            mask = self.random_masking(x, self.min_mask_ratio, self.max_mask_ratio) # [B, L']
-            mask_repeat = mask.unsqueeze(dim=1).unsqueeze(dim=-1) # [B, 1, L', 1]
-            mask_repeat = mask_repeat.repeat(1, x.shape[1], 1, x.shape[-1]) # [B, V, L', C]
-            x = x * (1-mask_repeat) + mask_token * mask_repeat # removed token is 0
-
-            mask_seq = self.get_mask_seq(mask, seq_len+padding)
-            mask_seq = mask_seq[:, :seq_len]
-        else:
-            mask_seq = None
-        
-        x = torch.cat((x, x_cls_prompt), dim=2)
-        x = self.prior_aware(x, prior_emb) # [B, V, L, C]
-
-        mask_dec_out = self.forecast_head(x[:, :, :-x_cls_prompt.shape[2]], seq_len+padding)
-        mask_dec_out = mask_dec_out[:, :seq_len] # [B, L, V]
-
-        r_loss = lambda_recon * calculate_reconstruct_loss(seq, mask_dec_out, mask_seq)
-        return r_loss
-
-    def contrast(self, x, y, temperature):
-        """
-        contrastive learning
-        aim to reduce the gap between x and y
-        """
-        x_clip_prompt = self.clip_token.repeat(x.shape[0], 1, 1, 1)
-
-        x = torch.cat((x, x_clip_prompt), dim=2)
-        x = self.backbone(x) # [B, V, L, C]
-        x_clip_token = x[:, :, -1, :].mean(1) # [B, C]
-
-        # stop gradient
-        # with torch.no_grad():
-        y_clip_prompt = self.clip_token.repeat(y.shape[0], 1, 1, 1)
-        y = torch.cat((y, y_clip_prompt), dim=2)
-        y = self.backbone(y) # [B, V, L, C]
-        y_clip_token = y[:, :, -1, :].mean(1) # [B, C]
-
-        c_loss = calculate_contrast_loss(x_clip_token, y_clip_token, temperature)
-
-        # remove the prefix_prompt and cls_token
-        x = x[:, :, :-x_clip_prompt.shape[2], :]
-        return x, x_clip_token, c_loss
     
     def classify(self, x, prior_emb=None):
-        x_clip_prompt = self.clip_token.repeat(x.shape[0], 1, 1, 1)
         x_cls_prompt = self.cls_token.repeat(x.shape[0], 1, 1, 1)
         category_token = self.category_tokens.repeat(x.shape[0], 1, 1, 1)
 
-        x = torch.cat((x, x_clip_prompt), dim=2)
-        x = self.backbone(x) # [B, V, L, C]
-        x = x[:, :, :-x_clip_prompt.shape[2], :] # remove the clip_prompt
-
+        if prior_emb is not None:
+            prior_emb = self.ctx_proj(prior_emb)
         x = torch.cat((x, x_cls_prompt), dim=2)
-        x = self.prior_aware(x, prior_emb) # [B, V, L, C]
+        x = self.backbone(x, prior_emb) # [B, V, L, C]
+
         out = self.cls_head(x, category_token)
 
         return out
     
-    def forward(self, x, prior_emb=None, y=None, is_mask=True, lambda_recon=1.0, temperature=0.07):
+    def forward(self, x, prior_emb=None):
         # x: [B, L, V]
-        seq_len = x.shape[1]
-        seq_src = x.detach().clone()
-
         x, n_vars, pad = self.tokenize(x) # [B*V, L, C]
         x = torch.reshape(x, (-1, n_vars, x.shape[-2], x.shape[-1])) # [B, V, L, C]
         x = x + self.position_embedding(x)
 
-        if self.task == 'cls':
-            return self.classify(x, prior_emb)
-        elif self.task == 'aware':
-            seq = (seq_src, seq_len, pad)
-
-            # with torch.no_grad():
-            y, n_vars, _ = self.tokenize(y)
-            y = torch.reshape(y, (-1, n_vars, y.shape[-2], y.shape[-1])) # [B, V, L, C]
-            y = y + self.position_embedding(y)
-            
-            x, x_cls_token, c_loss = self.contrast(x, y, temperature)
-
-            r_loss = self.reconstruct(x, seq, prior_emb, is_mask, lambda_recon)
-
-            return (c_loss+r_loss, c_loss, r_loss)
+        return self.classify(x, prior_emb)
 
 @dataclass
 class UniTSArgs:

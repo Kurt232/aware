@@ -60,7 +60,6 @@ for DATA_CONFIG in $CONFIGS/*.yaml; do
         --patch_len 8 \
         --stride 8 \
         --dropout 0.1 \
-        --prompt_num 10 \
         > "$TRAIN_DIR"/output.log
     
     mkdir -p "$OUTPUT_DIR"
