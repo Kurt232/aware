@@ -1,0 +1,19 @@
+NAME: realworld
+TRAIN:
+  LOC:
+  - chest
+  - upperarm
+  - forearm
+  - thigh
+  - waist
+  META:
+  - '/data/wjdu/hal/data1/3000/realworld.json'
+TEST:
+  LOC:
+  - chest
+  - upperarm
+  - forearm
+  - thigh
+  - waist
+  META:
+  - '/data/wjdu/hal/data1/600_r/realworld.json'
