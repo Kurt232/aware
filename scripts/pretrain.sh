@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 set -e  # Exit immediately if a command exits with a non-zero status
 
-ROOT="/data/wjdu/hal2/0204"
+ROOT="/data/wjdu/hal2/0204_1"
 MODEL="wo_aware"
 SETTING_ID=0
 # FLAG="${SETTING_ID}"
 
-GPUS="2,3,4,5,6,7"
+GPUS="4,5,6,7"
 MASTER_PORT=2333
 NNODE=$(($(echo $GPUS | tr -cd , | wc -c) + 1))
 
-CONFIGS="data/pretrain"
+CONFIGS="data/pretrain1"
 
 for DATA_CONFIG in $CONFIGS/*.yaml; do
     # Increment loop index
@@ -23,7 +23,7 @@ for DATA_CONFIG in $CONFIGS/*.yaml; do
 
     FLAG=$(basename ${DATA_CONFIG%.yaml})
     # TIMESTAMP="_"$(date +%m%d%H%M)
-    TRAIN_DIR="${ROOT}/pretrain/${FLAG}/${MODEL}${TIMESTAMP}"
+    TRAIN_DIR="${ROOT}/pretrain1/${FLAG}/${MODEL}${TIMESTAMP}"
     mkdir -p "$TRAIN_DIR"
 
     CUDA_VISIBLE_DEVICES="$GPUS" torchrun --nproc_per_node=$NNODE --master_port=$MASTER_PORT \
@@ -43,7 +43,7 @@ for DATA_CONFIG in $CONFIGS/*.yaml; do
         --patch_len 8 \
         --stride 8 \
         --dropout 0.1 \
-        --min_mask_ratio 0.2 \
-        --max_mask_ratio 0.4 \
+        --min_mask_ratio 0.1 \
+        --max_mask_ratio 0.2 \
         > "$TRAIN_DIR/output.log"
 done

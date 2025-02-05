@@ -4,7 +4,7 @@ set -e
 ROOT=$1
 
 MASTER_PORT=6200
-OFFSET=1
+OFFSET=4
 # Store background process IDs
 pids=()
 
