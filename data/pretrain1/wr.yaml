@@ -1,0 +1,6 @@
+NAME: shoaib
+TRAIN:
+  LOC:
+  - wrist
+  META:
+  - '/data/wjdu/hal2/data/90/shoaib.json'

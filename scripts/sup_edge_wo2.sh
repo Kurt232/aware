@@ -2,7 +2,7 @@
 set -e  # Exit immediately if a command exits with a non-zero status
 
 ROOT=$1
-CONFIGS=data/intra
+CONFIGS=data/intra1
 MODEL=$2
 SETTING_ID=0
 PHASE="ft"
@@ -32,8 +32,8 @@ for DATA_CONFIGS in $CONFIGS/*; do
         CURRENT_IDX=$((CURRENT_IDX + 1))
 
         FLAG=$(basename ${DATA_CONFIG%.yaml})
-        LOAD_PATH="${ROOT}/pretrain/${FLAG}/${MODEL}${MARK}/checkpoint-199.pth"
-        TRAIN_DIR="${ROOT}/sup_edge/${MODEL}${MARK}_${DATA_FLAG}/${MODEL}_${FLAG}"
+        LOAD_PATH="${ROOT}/pretrain/shoaib/${MODEL}${MARK}/checkpoint-199.pth"
+        TRAIN_DIR="${ROOT}/sup_edge2/${MODEL}${MARK}_${DATA_FLAG}/${MODEL}_${FLAG}"
 
         # if exists TRAIN_DIR, skip
         if [ -d "$TRAIN_DIR" ]; then
@@ -53,7 +53,6 @@ for DATA_CONFIGS in $CONFIGS/*; do
             --output_dir "$TRAIN_DIR" \
             --seed 42 \
             --setting_id $SETTING_ID \
-            --enable_aware \
             --phase $PHASE \
             --d_model 256 \
             --n_heads 8 \
@@ -63,9 +62,9 @@ for DATA_CONFIGS in $CONFIGS/*; do
             --dropout 0.1 \
             > "$TRAIN_DIR"/output.log
         
-        OUTPUT_DIR="${ROOT}/result/sup_edge/${MODEL}${MARK}_${DATA_FLAG}/${MODEL}_${FLAG}"
+        OUTPUT_DIR="${ROOT}/result/sup_edge2/${MODEL}${MARK}_${DATA_FLAG}/${MODEL}_${FLAG}"
         mkdir -p "$OUTPUT_DIR"
-        CUDA_VISIBLE_DEVICES="$GPUS" python infer.py -l "$TRAIN_DIR" -d "$DATA_CONFIG" -o "$OUTPUT_DIR" --enable_aware > "${OUTPUT_DIR}/output.log"
+        CUDA_VISIBLE_DEVICES="$GPUS" python infer1.py -l "$TRAIN_DIR" -d "$DATA_CONFIG" -o "$OUTPUT_DIR" > "${OUTPUT_DIR}/output.log"
         CUDA_VISIBLE_DEVICES="$GPUS" python eval.py "$OUTPUT_DIR" > "${OUTPUT_DIR}/output_still.log"
     done
 done

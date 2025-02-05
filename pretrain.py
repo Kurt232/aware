@@ -35,7 +35,6 @@ def get_args_parser():
     parser.add_argument('--patch_len', default=8, type=int)
     parser.add_argument('--stride', default=8, type=int)
     parser.add_argument('--dropout', default=0.1, type=float)
-    parser.add_argument('--prompt_num', default=10, type=int)
     
     # Pretrain parameters
     parser.add_argument('--min_mask_ratio', default=0.7, type=float)
@@ -79,24 +78,6 @@ def get_args_parser():
     parser.set_defaults(enable_aware=False)
     return parser
 
-def calculate_reconstruction_loss(x_enc, mask_dec_out, mask_seq):
-    """
-    x_enc: Original input tensor [batch_size, seq_len, num_vars]
-    mask_dec_out: Model's predictions [batch_size, seq_len, num_vars]
-    mask_seq: Mask tensor indicating which positions were masked [batch_size, seq_len]
-    """
-    # Only calculate loss on masked positions
-    mask = mask_seq.unsqueeze(-1)  # [batch_size, seq_len, 1]
-    
-    # Calculate MSE loss only on masked positions
-    loss = F.mse_loss(mask_dec_out * mask, x_enc * mask, reduction='sum')
-    
-    # Normalize by the number of masked elements
-    num_masked = mask.sum()
-    loss = loss / num_masked if num_masked > 0 else loss
-    
-    return loss
-
 def train_one_epoch(model: nn.Module,
                     data_loader: Iterable, 
                     optimizer: torch.optim.Optimizer,
@@ -126,8 +107,7 @@ def train_one_epoch(model: nn.Module,
             location_emb = None
         
         with torch.cuda.amp.autocast():
-            mask_out, mask_seq = model(imu_input, prior_emb=location_emb)
-            loss = calculate_reconstruction_loss(imu_input, mask_out, mask_seq)
+            loss = model(imu_input, prior_emb=location_emb)
 
         loss_value = loss.item()
 
@@ -177,8 +157,7 @@ def evaluate(model: nn.Module,
                 location_emb = None
             
             with torch.cuda.amp.autocast():
-                mask_out, mask_seq = model(imu_input, prior_emb=location_emb)
-                loss = calculate_reconstruction_loss(imu_input, mask_out, mask_seq)
+                loss = model(imu_input, prior_emb=location_emb)
 
             loss_value = loss.item()
             if not math.isfinite(loss_value):
@@ -269,7 +248,7 @@ def main(args):
         enc_in=6,  # 6 channels for IMU data (3 acc + 3 gyro)
         num_class=7,  # Number of activity classes
         args=args,
-        task='pretrain'
+        task='recon',
     )
     model.to(device)
 

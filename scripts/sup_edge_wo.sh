@@ -1,17 +1,16 @@
 #!/usr/bin/env bash
 set -e  # Exit immediately if a command exits with a non-zero status
 
-GPUS="1"
-
 ROOT=$1
-MODEL="wo_sup"
+CONFIGS=data/intra
+MODEL=$2
 SETTING_ID=0
-PHASE="all"
+PHASE="ft"
 MARK=""
 
-MASTER_PORT=3500
+MASTER_PORT=$3
+GPUS=$4
 NNODE=$(($(echo $GPUS | tr -cd , | wc -c) + 1))
-CONFIGS="data/ft_edge"
 
 for DATA_CONFIGS in $CONFIGS/*; do
     # Increment loop index
@@ -33,6 +32,7 @@ for DATA_CONFIGS in $CONFIGS/*; do
         CURRENT_IDX=$((CURRENT_IDX + 1))
 
         FLAG=$(basename ${DATA_CONFIG%.yaml})
+        LOAD_PATH="${ROOT}/pretrain/${FLAG}/${MODEL}${MARK}/checkpoint-199.pth"
         TRAIN_DIR="${ROOT}/sup_edge/${MODEL}${MARK}_${DATA_FLAG}/${MODEL}_${FLAG}"
 
         # if exists TRAIN_DIR, skip

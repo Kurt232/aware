@@ -584,6 +584,53 @@ class CLSHead(nn.Module):
         return distance
 
 
+class ForecastHead(nn.Module):
+    def __init__(self, d_model, patch_len, stride, pad, head_dropout=0):
+        super().__init__()
+        d_mid = d_model
+        self.proj_in = nn.Linear(d_model, d_mid)
+        self.mlp = Mlp(
+            in_features=d_model,
+            hidden_features=int(d_model * 4),
+            act_layer=nn.GELU,
+            drop=head_dropout,
+        )
+        self.proj_out = nn.Linear(d_model, patch_len)
+        self.pad = pad
+        self.patch_len = patch_len
+        self.stride = stride
+
+    def forward(self, x_full, pred_len):
+        x = self.proj_in(x_full) # [B, V, L, C]
+        x = self.mlp(x) # [B, V, L, C]
+        x = self.proj_out(x) # [B, V, L, patch_len]
+
+        bs, n_vars = x.shape[0], x.shape[1]
+        x = x.reshape(-1, x.shape[-2], x.shape[-1]) # [B*V, L, patch_len]
+        x = x.permute(0, 2, 1) # [B*V, patch_len, L]
+        x = torch.nn.functional.fold(x, output_size=(
+            pred_len, 1), kernel_size=(self.patch_len, 1), stride=(self.stride, 1)) # [B*V, patch_len, pred_len]
+        x = x.squeeze(dim=-1) # [B, V, patch_len, pred_len]
+        x = x.reshape(bs, n_vars, -1) # [B, V, patch_len*pred_len]
+        x = x.permute(0, 2, 1) # [B, patch_len*pred_len, V]
+        return x
+
+
+def calculate_reconstruct_loss(x_enc, mask_dec_out, mask):
+    """
+    x_enc: Original input tensor [B, L, V]
+    mask_dec_out: Model's predictions [B, L, V]
+    mask_seq: Mask tensor indicating which positions were masked [B, L] (1 for masked positions, 0 otherwise)
+    """
+    loss = (mask_dec_out - x_enc) ** 2 # [B, L, V]
+    loss = loss.mean(dim=-1) # [B, L]
+    if mask is not None:
+        loss = (loss * mask).sum() / mask.sum()
+    else:
+        loss = loss.mean()
+    return loss
+
+
 class UniTS(nn.Module):
     """
     UniTS: Building a Unified Time Series Model
@@ -601,7 +648,14 @@ class UniTS(nn.Module):
         super().__init__()
 
         self.task = task
-        self.phase = args.phase
+        if task == 'recon':
+            self.min_mask_ratio = args.min_mask_ratio
+            self.max_mask_ratio = args.max_mask_ratio
+            self.phase = 'all'
+        elif task == 'cls':
+            self.phase = args.phase
+        else:
+            raise ValueError(f"Invalid task: {task}, should be 'recon', or 'cls'")
 
         # Tokens settings
         self.mask_token = nn.Parameter(torch.zeros(1, enc_in, 1, args.d_model))
@@ -633,20 +687,25 @@ class UniTS(nn.Module):
 
         # output processing
         self.cls_head = CLSHead(args.d_model, head_dropout=args.dropout)
+        self.forecast_head = ForecastHead(args.d_model, args.patch_len, args.stride, args.stride, head_dropout=args.dropout)
 
         # Prior knowledge injection
         d_clip = 512
         self.ctx_proj = nn.Linear(d_clip, args.d_model)
         
-        # if self.task != 'aware':
-        #     for name, param in self.named_parameters():
-        #         if 'ctx' in name:
-        #             param.requires_grad = False
-        #         if self.phase == 'cls':
-        #             if 'cls_head' in name:
-        #                 param.requires_grad = True
-        #             else:
-        #                 param.requires_grad = False
+        if self.task == 'cls':
+            if self.phase == 'cls':
+                for name, param in self.named_parameters():
+                    if 'cls_head' in name:
+                        param.requires_grad = True
+                    else:
+                        param.requires_grad = False
+            elif self.phase == 'ft':
+                for name, param in self.named_parameters():
+                    if 'ctx' in name:
+                        param.requires_grad = False
+                    else:
+                        param.requires_grad = True
 
     def tokenize(self, x, mask=None):
         x = x.permute(0, 2, 1) # [B, V, L]
@@ -665,12 +724,53 @@ class UniTS(nn.Module):
             x = block(x, prior_emb)
         return x
     
+    def random_masking(self, x, min_mask_ratio, max_mask_ratio):
+        """
+        Perform per-sample random masking.
+        """
+        N, V, L, D = x.shape  # batch, var, length, dim
+
+        # Calculate mask ratios and lengths to keep for each sample in the batch
+        mask_ratios = torch.rand(N, device=x.device) * \
+            (max_mask_ratio - min_mask_ratio) + min_mask_ratio
+        len_keeps = (L * (1 - mask_ratios)).long()
+
+        noise = torch.rand(N, L, device=x.device)  # noise in [0, 1]
+
+        # sort noise for each sample
+        # ascend: small is keep, large is remove
+        ids_shuffle = torch.argsort(noise, dim=1)
+        ids_restore = torch.argsort(ids_shuffle, dim=1)
+
+        # generate the binary mask: 0 is keep, 1 is remove
+        mask = torch.ones([N, L], device=x.device)
+
+        # Create a range tensor and compare with len_keeps for mask generation
+        range_tensor = torch.arange(L, device=x.device).expand(N, L)
+        mask = (range_tensor >= len_keeps.unsqueeze(1))
+
+        # unshuffle to get the binary mask
+        mask = torch.gather(mask, dim=1, index=ids_restore)
+        mask = mask.float()
+
+        return mask # [B, L]
+    
+    def get_mask_seq(self, mask, seq_len):
+        mask_seq = mask.unsqueeze(dim=-1).repeat(1, 1, self.patch_len)
+        mask_seq = mask_seq.permute(0, 2, 1)
+        mask_seq = mask_seq.masked_fill(mask_seq == 0, -1e9)
+        # Fold operation
+        mask_seq = torch.nn.functional.fold(mask_seq, output_size=(
+            seq_len, 1), kernel_size=(self.patch_len, 1), stride=(self.stride, 1))
+        # Apply threshold to bring back to 0/1 values
+        mask_seq = (mask_seq > 0).float()
+        mask_seq = mask_seq.squeeze(dim=-1).squeeze(dim=1)
+        return mask_seq
+    
     def classify(self, x, prior_emb=None):
         x_cls_prompt = self.cls_token.repeat(x.shape[0], 1, 1, 1)
         category_token = self.category_tokens.repeat(x.shape[0], 1, 1, 1)
 
-        if prior_emb is not None:
-            prior_emb = self.ctx_proj(prior_emb)
         x = torch.cat((x, x_cls_prompt), dim=2)
         x = self.backbone(x, prior_emb) # [B, V, L, C]
 
@@ -678,13 +778,51 @@ class UniTS(nn.Module):
 
         return out
     
+    def reconstruct(self, x, seqs, prior_emb=None, is_mask=True, lambda_recon=1.0):
+        """
+        aim to reconstruct the input x with context prior
+        """
+        # x: [B, V, L, C]
+        mask_token = self.mask_token
+
+        seq, seq_len, padding = seqs
+
+        # mask
+        if is_mask:
+            mask = self.random_masking(x, self.min_mask_ratio, self.max_mask_ratio) # [B, L']
+            mask_repeat = mask.unsqueeze(dim=1).unsqueeze(dim=-1) # [B, 1, L', 1]
+            mask_repeat = mask_repeat.repeat(1, x.shape[1], 1, x.shape[-1]) # [B, V, L', C]
+            x = x * (1-mask_repeat) + mask_token * mask_repeat # removed token is 0
+
+            mask_seq = self.get_mask_seq(mask, seq_len+padding)
+            mask_seq = mask_seq[:, :seq_len]
+        else:
+            mask_seq = None
+        
+        x = self.backbone(x, prior_emb) # [B, V, L, C]
+
+        mask_dec_out = self.forecast_head(x, seq_len+padding)
+        mask_dec_out = mask_dec_out[:, :seq_len] # [B, L, V]
+
+        r_loss = lambda_recon * calculate_reconstruct_loss(seq, mask_dec_out, mask_seq)
+        return r_loss
+    
     def forward(self, x, prior_emb=None):
         # x: [B, L, V]
+        seq_len = x.shape[1]
+        seq_src = x.detach().clone()
         x, n_vars, pad = self.tokenize(x) # [B*V, L, C]
         x = torch.reshape(x, (-1, n_vars, x.shape[-2], x.shape[-1])) # [B, V, L, C]
         x = x + self.position_embedding(x)
 
-        return self.classify(x, prior_emb)
+        if prior_emb is not None:
+            prior_emb = self.ctx_proj(prior_emb)
+        
+        if self.task == 'cls':
+            return self.classify(x, prior_emb)
+        elif self.task == 'recon':
+            seqs = (seq_src, seq_len, pad)
+            return self.reconstruct(x, seqs, prior_emb)
 
 @dataclass
 class UniTSArgs:

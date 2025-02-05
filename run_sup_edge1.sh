@@ -1,6 +1,10 @@
+#!/usr/bin/env bash
 set -e
 
 ROOT=$1
+
+MASTER_PORT=6200
+OFFSET=1
 # Store background process IDs
 pids=()
 
@@ -16,9 +20,19 @@ cleanup() {
 # Trap SIGINT (Ctrl+C) and call cleanup
 trap cleanup SIGINT
 
-bash scripts/sup_edge_w1.sh "$ROOT" &
+CURRENT_IDX=0
+echo "Running sup_edge_w.sh"
+GPUS="$(( (CURRENT_IDX + OFFSET) % 8 ))"
+bash scripts/sup_edge_w1.sh "$ROOT" "w_aware" $((MASTER_PORT + 10 * $CURRENT_IDX)) $GPUS &
+# Store the process ID
 pids+=($!)
-bash scripts/sup_edge_wo1.sh "$ROOT" &
+CURRENT_IDX=$((CURRENT_IDX + 1))
+
+echo "Running sup_edge_wo.sh"
+GPUS="$(( (CURRENT_IDX + OFFSET) % 8 ))"
+bash scripts/sup_edge_wo1.sh "$ROOT" "wo_aware" $((MASTER_PORT + 10 * $CURRENT_IDX)) $GPUS &
+# Store the process ID
 pids+=($!)
+CURRENT_IDX=$((CURRENT_IDX + 1))
 
 wait

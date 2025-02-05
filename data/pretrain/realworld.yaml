@@ -1,0 +1,10 @@
+NAME: realworld
+TRAIN:
+  LOC:
+  - chest
+  - upperarm
+  - forearm
+  - thigh
+  - waist
+  META:
+  - '/data/wjdu/hal2/data/90/realworld.json'

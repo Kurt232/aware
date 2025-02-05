@@ -1,0 +1,9 @@
+NAME: shoaib
+TRAIN:
+  LOC:
+  - wrist
+  - thigh
+  - upperarm
+  - hip
+  META:
+  - '/data/wjdu/hal2/data/90/shoaib.json'

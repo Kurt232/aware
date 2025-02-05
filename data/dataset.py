@@ -55,9 +55,9 @@ class IMUDataset(Dataset):
         # Precompute location embeddings
         self.location_embs = {}
         with torch.no_grad():
-            for loc in self.DEFAULT_LOC:
-                text = clip.tokenize([loc])
-                self.location_embs[loc] = clip_model.encode_text(text)
+            for l in loc:
+                text = clip.tokenize([l])
+                self.location_embs[l] = clip_model.encode_text(text)
         
         del clip_model
 

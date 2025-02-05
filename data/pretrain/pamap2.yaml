@@ -1,0 +1,9 @@
+NAME: pamap2
+TRAIN:
+  LOC:
+  - wrist
+  - chest
+  - ankle
+  META:
+  - '/data/wjdu/hal2/data/90/pamap2.json'
+
