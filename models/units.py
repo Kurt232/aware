@@ -383,7 +383,7 @@ class VarAttBlock(nn.Module):
     def __init__(
             self,
             dim,
-            num_heads,
+            num_heads, 
             qkv_bias=False,
             qk_norm=False,
             proj_drop=0.,
@@ -631,6 +631,80 @@ def calculate_reconstruct_loss(x_enc, mask_dec_out, mask):
     return loss
 
 
+def calculate_contrast_loss(x, y, temperature=0.07):
+    """
+    Args:
+        x (torch.Tensor): Feature tensor for first modality, cls token, shape [batch_size, d_model]
+        y (torch.Tensor): Feature tensor for second modality, cls token, shape [batch_size, d_model]
+        temperature (float): Temperature parameter for scaling logits
+
+    Returns:
+        torch.Tensor: Scalar CLIP-like contrastive loss
+    """
+    
+    # Normalize features to unit vectors
+    x = F.normalize(x, dim=1)
+    y = F.normalize(y, dim=1)
+    
+    # Compute pairwise similarity: [batch_size, batch_size]
+    logits_xy = torch.matmul(x, y.t()) / temperature
+    
+    # By symmetry, we can reuse the same matrix transposed for the other direction
+    # or simply compute y -> x as well (equivalent to logits_xy.t() if shapes match).
+    logits_yx = logits_xy.t()
+    
+    # Labels: each sample in the batch is the "positive" for itself
+    batch_size = x.size(0)
+    labels = torch.arange(batch_size, device=x.device)
+    
+    # Cross-entropy for x->y
+    loss_xy = F.cross_entropy(logits_xy, labels)
+    # Cross-entropy for y->x
+    loss_yx = F.cross_entropy(logits_yx, labels)
+    
+    # Final CLIP-like loss is the average of the two directions
+    return (loss_xy + loss_yx) / 2
+
+
+def random_rotation(tensor: torch.Tensor) -> torch.Tensor:
+    """
+    Apply a random rotation to each sample in the batch.
+    Input tensor shape: [B, L, 6]
+    Each sample gets a unique rotation matrix applied to both 3-channel parts.
+    Assumes tensor is on GPU.
+    """
+    B, L, C = tensor.shape
+    assert C == 6, "Expected last dimension of size 6"
+
+    # Generate random rotation matrices for each sample:
+    quaternions = torch.randn(B, 4, device=tensor.device)
+    quaternions = quaternions / quaternions.norm(dim=1, keepdim=True)
+    w = quaternions[:, 0]
+    x = quaternions[:, 1]
+    y = quaternions[:, 2]
+    z = quaternions[:, 3]
+
+    rot_mats = torch.zeros(B, 3, 3, device=tensor.device)
+    rot_mats[:, 0, 0] = 1 - 2*(y**2 + z**2)
+    rot_mats[:, 0, 1] = 2*(x*y - z*w)
+    rot_mats[:, 0, 2] = 2*(x*z + y*w)
+    rot_mats[:, 1, 0] = 2*(x*y + z*w)
+    rot_mats[:, 1, 1] = 1 - 2*(x**2 + z**2)
+    rot_mats[:, 1, 2] = 2*(y*z - x*w)
+    rot_mats[:, 2, 0] = 2*(x*z - y*w)
+    rot_mats[:, 2, 1] = 2*(y*z + x*w)
+    rot_mats[:, 2, 2] = 1 - 2*(x**2 + y**2)
+
+    new_tensor = tensor.clone()
+    # Apply rotation to each 3-channel part per sample.
+    for i in range(0, 6, 3):
+        part = new_tensor[:, :, i:i+3]  # shape: [B, L, 3]
+        rotated_part = torch.bmm(part, rot_mats.transpose(1, 2))
+        new_tensor[:, :, i:i+3] = rotated_part
+
+    return new_tensor
+
+
 class UniTS(nn.Module):
     """
     UniTS: Building a Unified Time Series Model
@@ -654,16 +728,16 @@ class UniTS(nn.Module):
             self.phase = 'all'
         elif task == 'cls':
             self.phase = args.phase
+        elif task == 'clr':
+            self.phase = 'all'
         else:
-            raise ValueError(f"Invalid task: {task}, should be 'recon', or 'cls'")
+            raise ValueError(f"Invalid task: {task}, should be 'recon', 'clr' or 'cls'")
 
         # Tokens settings
         self.mask_token = nn.Parameter(torch.zeros(1, enc_in, 1, args.d_model))
-        self.clip_token = nn.Parameter(torch.zeros(1, enc_in, 1, args.d_model))
         self.cls_token = nn.Parameter(torch.zeros(1, enc_in, 1, args.d_model))
         self.category_tokens = nn.Parameter(torch.zeros(1, enc_in, num_class, args.d_model))
 
-        nn.init.normal_(self.clip_token, std=0.02)
         nn.init.normal_(self.cls_token, std=0.02)
         nn.init.normal_(self.category_tokens, std=0.02)
 
@@ -716,6 +790,8 @@ class UniTS(nn.Module):
         else:
             padding = 0
         x, n_vars = self.patch_embeddings(x)
+        x = torch.reshape(x, (-1, n_vars, x.shape[-2], x.shape[-1])) # [B, V, L, C]
+        x = x + self.position_embedding(x)
         return x, n_vars, padding
 
     def backbone(self, x, prior_emb=None):
@@ -766,7 +842,7 @@ class UniTS(nn.Module):
         mask_seq = (mask_seq > 0).float()
         mask_seq = mask_seq.squeeze(dim=-1).squeeze(dim=1)
         return mask_seq
-    
+
     def classify(self, x, prior_emb=None):
         x_cls_prompt = self.cls_token.repeat(x.shape[0], 1, 1, 1)
         category_token = self.category_tokens.repeat(x.shape[0], 1, 1, 1)
@@ -807,22 +883,52 @@ class UniTS(nn.Module):
         r_loss = lambda_recon * calculate_reconstruct_loss(seq, mask_dec_out, mask_seq)
         return r_loss
     
+    def contrast(self, x, y, temperature=0.07, prior_emb=None):
+        """
+        contrastive learning
+        aim to reduce the gap between x and y
+        """
+        x_clip_prompt = torch.zeros(x.shape[0], x.shape[1], 1, x.shape[-1], device=x.device)
+
+        x = torch.cat((x, x_clip_prompt), dim=2)
+        x = self.backbone(x, prior_emb) # [B, V, L, C]
+        x_clip_token = x[:, :, -1, :].mean(1) # [B, C]
+
+        # stop gradient
+        # with torch.no_grad():
+        y_clip_prompt = torch.zeros(y.shape[0], y.shape[1], 1, y.shape[-1], device=y.device)
+        y = torch.cat((y, y_clip_prompt), dim=2)
+        y = self.backbone(y, prior_emb) # [B, V, L, C]
+        y_clip_token = y[:, :, -1, :].mean(1) # [B, C]
+
+        c_loss = calculate_contrast_loss(x_clip_token, y_clip_token, temperature)
+
+        return c_loss
+    
     def forward(self, x, prior_emb=None):
         # x: [B, L, V]
-        seq_len = x.shape[1]
-        seq_src = x.detach().clone()
-        x, n_vars, pad = self.tokenize(x) # [B*V, L, C]
-        x = torch.reshape(x, (-1, n_vars, x.shape[-2], x.shape[-1])) # [B, V, L, C]
-        x = x + self.position_embedding(x)
-
         if prior_emb is not None:
             prior_emb = self.ctx_proj(prior_emb)
         
         if self.task == 'cls':
+            x, _, _ = self.tokenize(x)
             return self.classify(x, prior_emb)
         elif self.task == 'recon':
+            seq_len = x.shape[1]
+            seq_src = x.detach().clone()
+            x, _, pad = self.tokenize(x)
             seqs = (seq_src, seq_len, pad)
             return self.reconstruct(x, seqs, prior_emb)
+        elif self.task == 'clr':
+            y = x.detach().clone()
+
+            x = random_rotation(x)
+            x, _, _ = self.tokenize(x)
+
+            y = random_rotation(y)
+            y, _, _ = self.tokenize(y)
+
+            return self.contrast(x, y, prior_emb=prior_emb)
 
 @dataclass
 class UniTSArgs:
