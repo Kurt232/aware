@@ -8,8 +8,8 @@ import torch.nn.functional as F
 from torch import nn
 from functools import partial
 
-from timm.models.layers import DropPath
-from timm.models.layers.helpers import to_2tuple
+from timm.layers import DropPath
+from timm.layers.helpers import to_2tuple
 
 class Mlp(nn.Module):
     """ MLP as used in Vision Transformer, MLP-Mixer and related networks
@@ -764,7 +764,7 @@ class UniTS(nn.Module):
         self.forecast_head = ForecastHead(args.d_model, args.patch_len, args.stride, args.stride, head_dropout=args.dropout)
 
         # Prior knowledge injection
-        d_clip = 768
+        d_clip = 5120
         self.ctx_proj = nn.Linear(d_clip, args.d_model)
         
         if self.task == 'cls':
