@@ -31,7 +31,7 @@ CURRENT_IDX=$((CURRENT_IDX + 1))
 
 echo "Running sup_wo1.sh"
 GPUS="$(( (CURRENT_IDX + OFFSET) % 8 ))"
-bash scripts/sup_wo1.sh "$ROOT" "wo_${MODEL}" $((MASTER_PORT + 10 * $CURRENT_IDX)) $GPUS &
+# bash scripts/sup_wo1.sh "$ROOT" "wo_${MODEL}" $((MASTER_PORT + 10 * $CURRENT_IDX)) $GPUS &
 # Store the process ID
 pids+=($!)
 CURRENT_IDX=$((CURRENT_IDX + 1))

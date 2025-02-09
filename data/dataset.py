@@ -78,7 +78,7 @@ class IMUDataset(Dataset):
                     text = u_info + l
                     inputs = tokenizer(text, return_tensors="pt").to('cuda')
                     outputs = bert_model(**inputs, output_hidden_states=True)
-                    # self.user_embs[u_id] = outputs.hidden_states[-1][:, 0].to('cpu') # CLS token
+                    # self.embs[l][u_id] = outputs.hidden_states[-1][0, :].to('cpu')  # CLS token
                     self.embs[l][u_id] = outputs.hidden_states[-1].to('cpu') # sentence embedding
         
         del bert_model
@@ -147,7 +147,7 @@ class IMUSyncDataset(Dataset):
             for l in loc:
                 inputs = tokenizer(l, return_tensors="pt")
                 outputs = bert_model(**inputs, output_hidden_states=True)
-                # self.location_embs[l] = outputs.hidden_states[-1][:, 0].to('cpu')
+                # self.location_embs[l] = outputs.hidden_states[-1][0, :].to('cpu') 
                 self.location_embs[l] = outputs.hidden_states[-1].to('cpu')
         
         del bert_model

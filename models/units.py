@@ -413,39 +413,6 @@ class VarAttBlock(nn.Module):
         return x
 
 
-class CtxAttBlock(nn.Module):
-    def __init__(self,
-            dim,
-            num_heads=8,
-            qkv_bias=False,
-            qk_norm=False,
-            attn_drop=0.,
-            proj_drop=0.,
-            norm_layer=nn.LayerNorm,
-    ):
-        super().__init__()
-        self.norm1 = norm_layer(dim)
-        self.cross_attn = CrossAttention(
-            dim,
-            num_heads,
-            qkv_bias,
-            qk_norm,
-            attn_drop=attn_drop,
-            proj_drop=proj_drop,
-            norm_layer=norm_layer,
-        )
-    
-    def forward(self, x, ctx):
-        B, V, L, C = x.shape
-        x = x.view(-1, L, C) # [B*V, L, C]
-        ctx = ctx.unsqueeze(1) # [B, 1, N, C]
-        ctx = ctx.repeat(1, V, 1, 1).view(-1, ctx.shape[-2], ctx.shape[-1]) # [B*V, N, C]
-        cross_att_out = self.cross_attn(ctx, x) # [B*V, L, C]
-        x = x + cross_att_out
-        x = x.view(B, V, L, C)
-        return self.norm1(x)
-
-
 class MLPBlock(nn.Module):
 
     def __init__(
@@ -517,20 +484,14 @@ class BasicBlock(nn.Module):
                                          attn_drop=attn_drop, init_values=init_values, proj_drop=proj_drop,
                                          drop_path=drop_path, norm_layer=norm_layer)
 
-        self.ctx_att_block = CtxAttBlock(dim=dim, num_heads=num_heads,
-                                         attn_drop=attn_drop, proj_drop=proj_drop,
-                                         norm_layer=norm_layer)
-
         self.mlp = MLPBlock(dim=dim, mlp_ratio=mlp_ratio, mlp_layer=Mlp,
                                     proj_drop=proj_drop, init_values=init_values, drop_path=drop_path,
                                     act_layer=act_layer, norm_layer=norm_layer,
                                     )
 
-    def forward(self, x, ctx=None):
+    def forward(self, x):
         x = self.seq_att_block(x, attn_mask=None)
         x = self.var_att_block(x)
-        if ctx is not None:
-            x = self.ctx_att_block(x, ctx)
         x = self.mlp(x)
         return x
 
@@ -794,10 +755,10 @@ class UniTS(nn.Module):
         x = x + self.position_embedding(x)
         return x, n_vars, padding
 
-    def backbone(self, x, prior_emb=None):
+    def backbone(self, x):
         attn_mask = None
         for block in self.blocks:
-            x = block(x, prior_emb)
+            x = block(x)
         return x
     
     def random_masking(self, x, min_mask_ratio, max_mask_ratio):
@@ -847,8 +808,13 @@ class UniTS(nn.Module):
         x_cls_prompt = self.cls_token.repeat(x.shape[0], 1, 1, 1)
         category_token = self.category_tokens.repeat(x.shape[0], 1, 1, 1)
 
-        x = torch.cat((x, x_cls_prompt), dim=2)
-        x = self.backbone(x, prior_emb) # [B, V, L, C]
+        if prior_emb is not None:
+            # [B, L, C] -> [B, V, L, C]
+            prior_emb = prior_emb.unsqueeze(1).repeat(1, x.shape[1], 1, 1)
+            x = torch.cat((prior_emb, x, x_cls_prompt), dim=2)
+        else:
+            x = torch.cat((x, x_cls_prompt), dim=2)
+        x = self.backbone(x) # [B, V, L, C]
 
         out = self.cls_head(x, category_token)
 
