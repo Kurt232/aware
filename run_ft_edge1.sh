@@ -3,9 +3,8 @@ set -e
 
 ROOT=$1
 
-MASTER_PORT=5300
-OFFSET=6
-MODEL="clr"
+MASTER_PORT=5200
+OFFSET=4
 # Store background process IDs
 pids=()
 
@@ -22,16 +21,16 @@ cleanup() {
 trap cleanup SIGINT
 
 CURRENT_IDX=0
-echo "Running sup_edge_w.sh"
+echo "Running ft_edge.sh"
 GPUS="$(( (CURRENT_IDX + OFFSET) % 8 ))"
-bash scripts/sup_edge_w2.sh "$ROOT" "w_${MODEL}" $((MASTER_PORT + 10 * $CURRENT_IDX)) $GPUS &
+bash scripts/ft_edge1.sh "$ROOT" "w_aware" $((MASTER_PORT + 10 * $CURRENT_IDX)) $GPUS &
 # Store the process ID
 pids+=($!)
 CURRENT_IDX=$((CURRENT_IDX + 1))
 
-echo "Running sup_edge_wo.sh"
+echo "Running ft_edge_wo.sh"
 GPUS="$(( (CURRENT_IDX + OFFSET) % 8 ))"
-bash scripts/sup_edge_wo2.sh "$ROOT" "wo_${MODEL}" $((MASTER_PORT + 10 * $CURRENT_IDX)) $GPUS &
+bash scripts/ft_edge_wo1.sh "$ROOT" "wo_aware" $((MASTER_PORT + 10 * $CURRENT_IDX)) $GPUS &
 # Store the process ID
 pids+=($!)
 CURRENT_IDX=$((CURRENT_IDX + 1))

@@ -75,6 +75,7 @@ def get_args_parser():
     parser.add_argument('--setting_id', default=0, type=int, help='training setting')
     parser.add_argument('--phase', default='all', type=str, help='all, cls')
     parser.add_argument('--enable_aware', action='store_true', help='enable aware layer')
+    parser.add_argument('--task', default='recon', type=str, help='recon, clr')
     parser.set_defaults(enable_aware=False)
     return parser
 
@@ -248,7 +249,7 @@ def main(args):
         enc_in=6,  # 6 channels for IMU data (3 acc + 3 gyro)
         num_class=7,  # Number of activity classes
         args=args,
-        task='recon',
+        task=args.task,
     )
     model.to(device)
 

@@ -5,7 +5,7 @@ ROOT=$1
 CONFIGS=data/intra
 MODEL=$2
 SETTING_ID=0
-PHASE="ft"
+PHASE="all"
 MARK=""
 
 MASTER_PORT=$3

@@ -2,7 +2,7 @@
 set -e  # Exit immediately if a command exits with a non-zero status
 # sup
 ROOT=$1
-CONFIGS=data/intra
+CONFIGS=data/intra1
 MODEL=$2
 SETTING_ID=0
 PHASE="all"
@@ -34,7 +34,7 @@ for DATA_CONFIGS in $CONFIGS/*; do
         CURRENT_IDX=$((CURRENT_IDX + 1))
 
         FLAG=$(basename ${DATA_CONFIG%.yaml})
-        TRAIN_DIR="${ROOT}/sup/${MODEL}${MARK}_${DATA_FLAG}/${MODEL}_${FLAG}"
+        TRAIN_DIR="${ROOT}/sup1/${MODEL}${MARK}_${DATA_FLAG}/${MODEL}_${FLAG}"
 
         # if exists TRAIN_DIR, skip
         if [ -d "$TRAIN_DIR" ]; then
@@ -64,9 +64,9 @@ for DATA_CONFIGS in $CONFIGS/*; do
             --dropout 0.1 \
             > "$TRAIN_DIR"/output.log
         
-        OUTPUT_DIR="${ROOT}/result/sup/${MODEL}${MARK}_${DATA_FLAG}/${MODEL}_${FLAG}"
+        OUTPUT_DIR="${ROOT}/result/sup1/${MODEL}${MARK}_${DATA_FLAG}/${MODEL}_${FLAG}"
         mkdir -p "$OUTPUT_DIR"
-        CUDA_VISIBLE_DEVICES="$GPUS" python infer.py -l "$TRAIN_DIR" -d "$DATA_CONFIG" -o "$OUTPUT_DIR" --enable_aware > "${OUTPUT_DIR}/output.log"
+        CUDA_VISIBLE_DEVICES="$GPUS" python infer1.py -l "$TRAIN_DIR" -d "$DATA_CONFIG" -o "$OUTPUT_DIR" --enable_aware > "${OUTPUT_DIR}/output.log"
         CUDA_VISIBLE_DEVICES="$GPUS" python eval.py "$OUTPUT_DIR" > "${OUTPUT_DIR}/output_still.log"
     done
 done
