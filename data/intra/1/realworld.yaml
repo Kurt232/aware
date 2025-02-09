@@ -7,7 +7,7 @@ TRAIN:
   - thigh
   - waist
   META:
-  - '/data/wjdu/hal2/data2/1/realworld.json'
+  - '/data/wjdu/hal3/data/1/realworld.json'
 TEST:
   LOC:
   - chest
@@ -16,4 +16,4 @@ TEST:
   - thigh
   - waist
   META:
-  - '/data/wjdu/hal2/data1/10_r/realworld.json'
+  - '/data/wjdu/hal3/data/10_r/realworld.json'
