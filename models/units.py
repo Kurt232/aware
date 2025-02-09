@@ -705,6 +705,21 @@ def random_rotation(tensor: torch.Tensor) -> torch.Tensor:
     return new_tensor
 
 
+class DimAdapter(nn.Module):
+    """A module to adapt dimensionality between different model sizes."""
+    def __init__(self, d_in, d_hidden, d_out):
+        super(DimAdapter, self).__init__()
+        self.fc1 = nn.Linear(d_in, d_hidden)
+        self.relu = nn.ReLU()
+        self.fc2 = nn.Linear(d_hidden, d_out)
+
+    def forward(self, x):
+        x = self.fc1(x)
+        x = self.relu(x)
+        x = self.fc2(x)
+        return x
+
+
 class UniTS(nn.Module):
     """
     UniTS: Building a Unified Time Series Model
@@ -765,7 +780,7 @@ class UniTS(nn.Module):
 
         # Prior knowledge injection
         d_clip = 5120
-        self.ctx_proj = nn.Linear(d_clip, args.d_model)
+        self.ctx_proj = DimAdapter(d_clip, 1024, args.d_model)
         
         if self.task == 'cls':
             if self.phase == 'cls':
