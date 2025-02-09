@@ -764,7 +764,7 @@ class UniTS(nn.Module):
         self.forecast_head = ForecastHead(args.d_model, args.patch_len, args.stride, args.stride, head_dropout=args.dropout)
 
         # Prior knowledge injection
-        d_clip = 512
+        d_clip = 768
         self.ctx_proj = nn.Linear(d_clip, args.d_model)
         
         if self.task == 'cls':

@@ -1,3 +1,4 @@
+import os
 import pandas as pd
 import yaml
 import numpy as np
@@ -6,7 +7,10 @@ from typing import List, Dict
 import torch
 from torch.utils.data import Dataset
 from scipy.stats import special_ortho_group
-import clip
+from transformers import AutoTokenizer, AutoModelForMaskedLM
+
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+bert_config = "answerdotai/ModernBERT-base"
 
 def random_rotation(data: np.ndarray) -> np.ndarray:
     sensor_dim = 3
@@ -49,17 +53,36 @@ class IMUDataset(Dataset):
             'walk': 6
         }
 
-        # Load CLIP model
-        clip_model, _ = clip.load("ViT-B/32", device="cpu")
-
-        # Precompute location embeddings
-        self.location_embs = {}
+        tokenizer = AutoTokenizer.from_pretrained(bert_config)
+        bert_model = AutoModelForMaskedLM.from_pretrained(bert_config)
+        bert_model.cuda()
+        bert_model.eval()
+    
+        # Precompute embeddings using BERT
+        user_info = {
+            1: "a male aged 27 years, with a height of 182 cm and a weight of 83 kg, collected on ",
+            2: "a female aged 25 years, with a height of 169 cm and a weight of 78 kg, collected on ",
+            3: "a male aged 31 years, with a height of 187 cm and a weight of 92 kg, collected on ",
+            4: "a male aged 24 years, with a height of 194 cm and a weight of 95 kg, collected on ",
+            5: "a male aged 26 years, with a height of 180 cm and a weight of 73 kg, collected on ",
+            6: "a male aged 26 years, with a height of 183 cm and a weight of 69 kg, collected on ",
+            7: "a male aged 23 years, with a height of 173 cm and a weight of 86 kg, collected on ",
+            8: "a male aged 32 years, with a height of 179 cm and a weight of 87 kg, collected on ",
+            9: "a male aged 31 years, with a height of 168 cm and a weight of 65 kg, collected on "
+        }
+        self.embs = {l: {} for l in loc}
         with torch.no_grad():
             for l in loc:
-                text = clip.tokenize([l])
-                self.location_embs[l] = clip_model.encode_text(text)
+                self.embs[l] = {}
+                for u_id, u_info in user_info.items():
+                    text = u_info + l
+                    inputs = tokenizer(text, return_tensors="pt").to('cuda')
+                    outputs = bert_model(**inputs, output_hidden_states=True)
+                    # self.user_embs[u_id] = outputs.hidden_states[-1][:, 0].to('cpu') # CLS token
+                    self.embs[l][u_id] = outputs.hidden_states[-1].to('cpu') # sentence embedding
         
-        del clip_model
+        del bert_model
+        torch.cuda.empty_cache()
 
     def __len__(self):
         return len(self.data_list)
@@ -69,6 +92,7 @@ class IMUDataset(Dataset):
         imu_data = np.array(sample['imu_input'])
         caption, data_id = sample['output'], sample['data_id']
         location = sample['location']
+        user_id = sample['subject_id']
 
         if self.is_rotated:
             imu_data = random_rotation(imu_data)
@@ -76,9 +100,8 @@ class IMUDataset(Dataset):
         imu_input = torch.tensor(imu_data, dtype=torch.float32)
         label = torch.tensor([self.mapping[caption]], dtype=torch.int8)
         
-        location_emb = self.location_embs[location]
-        
-        return label, imu_input, location_emb, data_id
+        ctx_emb = self.embs[location][user_id]
+        return label, imu_input, ctx_emb, data_id
 
 
 class IMUSyncDataset(Dataset):
@@ -113,17 +136,21 @@ class IMUSyncDataset(Dataset):
             'walk': 6
         }
 
-        # Load CLIP model
-        clip_model, _ = clip.load("ViT-B/32", device="cpu")
-
-        # Precompute location embeddings
+        tokenizer = AutoTokenizer.from_pretrained(bert_config)
+        bert_model = AutoModelForMaskedLM.from_pretrained(bert_config)
+        bert_model.cuda()
+        bert_model.eval()
+        
+        # Precompute location embeddings using BERT
         self.location_embs = {}
         with torch.no_grad():
-            for loc in self.DEFAULT_LOC:
-                text = clip.tokenize([loc])
-                self.location_embs[loc] = clip_model.encode_text(text)
+            for l in loc:
+                inputs = tokenizer(l, return_tensors="pt")
+                outputs = bert_model(**inputs, output_hidden_states=True)
+                # self.location_embs[l] = outputs.hidden_states[-1][:, 0].to('cpu')
+                self.location_embs[l] = outputs.hidden_states[-1].to('cpu')
         
-        del clip_model
+        del bert_model
 
     def __len__(self):
         return len(self.data_list)
