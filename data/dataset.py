@@ -78,8 +78,8 @@ class IMUDataset(Dataset):
                     text = u_info + l
                     inputs = tokenizer(text, return_tensors="pt").to('cuda')
                     outputs = bert_model(**inputs, output_hidden_states=True)
-                    # self.user_embs[u_id] = outputs.hidden_states[-1][:, 0].to('cpu') # CLS token
-                    self.embs[l][u_id] = outputs.hidden_states[-1].to('cpu') # sentence embedding
+                    self.user_embs[l][u_id] = outputs.hidden_states[-1][:, 0].to('cpu') # CLS token
+                    # self.embs[l][u_id] = outputs.hidden_states[-1].to('cpu') # sentence embedding
         
         del bert_model
         torch.cuda.empty_cache()
