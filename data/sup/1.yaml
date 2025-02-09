@@ -1,17 +1,17 @@
-NAME: shoaib
+NAME: pamap2
 TRAIN:
   LOC:
   - wrist
-  - thigh
-  - upperarm
-  - hip
+  - chest
+  - ankle
   META:
-  - '/data/wjdu/hal3/data/1/shoaib.json'
+  - '/data/wjdu/hal3/data/1/pamap2.json'
+
 TEST:
   LOC:
   - wrist
-  - thigh
-  - upperarm
-  - hip
+  - chest
+  - ankle
   META:
-  - '/data/wjdu/hal3/data/10_r/shoaib.json'
+  - '/data/wjdu/hal3/data/10_r/pamap2.json'
+
