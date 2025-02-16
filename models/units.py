@@ -8,8 +8,8 @@ import torch.nn.functional as F
 from torch import nn
 from functools import partial
 
-from timm.models.layers import DropPath
-from timm.models.layers.helpers import to_2tuple
+from timm.layers import DropPath
+from timm.layers.helpers import to_2tuple
 
 class Mlp(nn.Module):
     """ MLP as used in Vision Transformer, MLP-Mixer and related networks
@@ -705,6 +705,21 @@ def random_rotation(tensor: torch.Tensor) -> torch.Tensor:
     return new_tensor
 
 
+class DimAdapter(nn.Module):
+    """A module to adapt dimensionality between different model sizes."""
+    def __init__(self, d_in, d_hidden, d_out):
+        super(DimAdapter, self).__init__()
+        self.fc1 = nn.Linear(d_in, d_hidden)
+        self.relu = nn.ReLU()
+        self.fc2 = nn.Linear(d_hidden, d_out)
+
+    def forward(self, x):
+        x = self.fc1(x)
+        x = self.relu(x)
+        x = self.fc2(x)
+        return x
+
+
 class UniTS(nn.Module):
     """
     UniTS: Building a Unified Time Series Model
@@ -728,7 +743,7 @@ class UniTS(nn.Module):
             self.phase = 'all'
         elif task == 'cls':
             self.phase = args.phase
-        elif task == 'clr':
+        elif task == 'clr' or task == 'aware':
             self.phase = 'all'
         else:
             raise ValueError(f"Invalid task: {task}, should be 'recon', 'clr' or 'cls'")
@@ -764,8 +779,8 @@ class UniTS(nn.Module):
         self.forecast_head = ForecastHead(args.d_model, args.patch_len, args.stride, args.stride, head_dropout=args.dropout)
 
         # Prior knowledge injection
-        d_clip = 512
-        self.ctx_proj = nn.Linear(d_clip, args.d_model)
+        d_clip = 5120
+        self.ctx_proj = DimAdapter(d_clip, 1024, args.d_model)
         
         if self.task == 'cls':
             if self.phase == 'cls':
@@ -883,7 +898,7 @@ class UniTS(nn.Module):
         r_loss = lambda_recon * calculate_reconstruct_loss(seq, mask_dec_out, mask_seq)
         return r_loss
     
-    def contrast(self, x, y, temperature=0.07, prior_emb=None):
+    def contrast(self, x, y, prior_emb=None, y_emb=None):
         """
         contrastive learning
         aim to reduce the gap between x and y
@@ -898,17 +913,19 @@ class UniTS(nn.Module):
         # with torch.no_grad():
         y_clip_prompt = torch.zeros(y.shape[0], y.shape[1], 1, y.shape[-1], device=y.device)
         y = torch.cat((y, y_clip_prompt), dim=2)
-        y = self.backbone(y, prior_emb) # [B, V, L, C]
+        y = self.backbone(y, y_emb) # [B, V, L, C]
         y_clip_token = y[:, :, -1, :].mean(1) # [B, C]
 
-        c_loss = calculate_contrast_loss(x_clip_token, y_clip_token, temperature)
+        c_loss = calculate_contrast_loss(x_clip_token, y_clip_token)
 
         return c_loss
     
-    def forward(self, x, prior_emb=None):
+    def forward(self, x, prior_emb=None, y=None, y_emb=None):
         # x: [B, L, V]
         if prior_emb is not None:
             prior_emb = self.ctx_proj(prior_emb)
+        if y_emb is not None:
+            y_emb = self.ctx_proj(y_emb)
         
         if self.task == 'cls':
             x, _, _ = self.tokenize(x)
@@ -928,7 +945,13 @@ class UniTS(nn.Module):
             y = random_rotation(y)
             y, _, _ = self.tokenize(y)
 
-            return self.contrast(x, y, prior_emb=prior_emb)
+            return self.contrast(x, y, prior_emb=prior_emb, y_emb=prior_emb)
+        elif self.task == 'aware':
+            x, _, _ = self.tokenize(x)
+            y, _, _ = self.tokenize(y)
+            return self.contrast(x, y, prior_emb, y_emb)
+        else:
+            raise ValueError(f"Invalid task: {self.task}, should be 'recon', 'clr' , 'aware', or 'cls'")
 
 @dataclass
 class UniTSArgs:

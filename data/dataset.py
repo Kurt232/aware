@@ -6,7 +6,7 @@ from typing import List, Dict
 import torch
 from torch.utils.data import Dataset
 from scipy.stats import special_ortho_group
-import clip
+import pickle
 
 def random_rotation(data: np.ndarray) -> np.ndarray:
     sensor_dim = 3
@@ -49,17 +49,11 @@ class IMUDataset(Dataset):
             'walk': 6
         }
 
-        # Load CLIP model
-        clip_model, _ = clip.load("ViT-B/32", device="cpu")
-
-        # Precompute location embeddings
-        self.location_embs = {}
-        with torch.no_grad():
-            for l in loc:
-                text = clip.tokenize([l])
-                self.location_embs[l] = clip_model.encode_text(text)
-        
-        del clip_model
+        with open('/home/wjdu/ctx_aware_pamap2/pamap2_loc_14B.pkl', 'rb') as f:
+            embs = pickle.load(f)
+        self.embs = {}
+        for l in loc:
+            self.embs[l] = embs[l].requires_grad_(False)
 
     def __len__(self):
         return len(self.data_list)
@@ -69,6 +63,7 @@ class IMUDataset(Dataset):
         imu_data = np.array(sample['imu_input'])
         caption, data_id = sample['output'], sample['data_id']
         location = sample['location']
+        user_id = sample['subject_id']
 
         if self.is_rotated:
             imu_data = random_rotation(imu_data)
@@ -76,9 +71,8 @@ class IMUDataset(Dataset):
         imu_input = torch.tensor(imu_data, dtype=torch.float32)
         label = torch.tensor([self.mapping[caption]], dtype=torch.int8)
         
-        location_emb = self.location_embs[location]
-        
-        return label, imu_input, location_emb, data_id
+        ctx_emb = self.embs[location]
+        return label, imu_input, ctx_emb, data_id
 
 
 class IMUSyncDataset(Dataset):
@@ -113,17 +107,11 @@ class IMUSyncDataset(Dataset):
             'walk': 6
         }
 
-        # Load CLIP model
-        clip_model, _ = clip.load("ViT-B/32", device="cpu")
-
-        # Precompute location embeddings
+        with open('/home/wjdu/ctx_aware_pamap2/pamap2_loc_14B.pkl', 'rb') as f:
+            embs = pickle.load(f)
         self.location_embs = {}
-        with torch.no_grad():
-            for loc in self.DEFAULT_LOC:
-                text = clip.tokenize([loc])
-                self.location_embs[loc] = clip_model.encode_text(text)
-        
-        del clip_model
+        for l in loc:
+            self.location_embs[l] = embs[l].requires_grad_(False)
 
     def __len__(self):
         return len(self.data_list)
@@ -141,7 +129,7 @@ class IMUSyncDataset(Dataset):
         s_id = sample['subject_id']
         # Find potential sync data
         matches = self.data_list[
-            # (self.data_list['offset'] == offset) & 
+            (self.data_list['offset'] == offset) & 
             (self.data_list['output'] == caption) &
             (self.data_list['subject_id'] == s_id) &
             (self.data_list['data_id'] != data_id) # exclude current data
@@ -160,6 +148,8 @@ class IMUSyncDataset(Dataset):
         
         if self.is_rotated:
             imu_data = random_rotation(origin_data)
+        else:
+            imu_data = origin_data
 
         imu_input = torch.tensor(imu_data, dtype=torch.float32)            
         return label, imu_input, location_emb, data_id, sync_input, sync_location_emb

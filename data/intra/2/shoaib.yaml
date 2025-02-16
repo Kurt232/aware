@@ -6,7 +6,7 @@ TRAIN:
   - upperarm
   - hip
   META:
-  - '/data/wjdu/hal2/data2/2/shoaib.json'
+  - '/data/wjdu/hal4/data/2/shoaib.json'
 TEST:
   LOC:
   - wrist
@@ -14,4 +14,4 @@ TEST:
   - upperarm
   - hip
   META:
-  - '/data/wjdu/hal2/data1/10_r/shoaib.json'
+  - '/data/wjdu/hal4/data/10_r/shoaib.json'

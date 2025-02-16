@@ -7,4 +7,4 @@ TRAIN:
   - thigh
   - waist
   META:
-  - '/data/wjdu/hal2/data2/80/realworld.json'
+  - '/data/wjdu/hal4/data/80/realworld.json'

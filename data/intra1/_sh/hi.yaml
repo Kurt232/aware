@@ -1,9 +1,9 @@
 NAME: shoaib
 TRAIN:
   LOC:
-  - wrist
+  - hip
   META:
-  - '/data/wjdu/hal2/data2/10/shoaib.json'
+  - '/data/wjdu/hal4/data/10/shoaib.json'
 TEST:
   LOC:
   - wrist
@@ -11,4 +11,4 @@ TEST:
   - upperarm
   - hip
   META:
-  - '/data/wjdu/hal2/data1/10_r/shoaib.json'
+  - '/data/wjdu/hal4/data/10_r/shoaib.json'
