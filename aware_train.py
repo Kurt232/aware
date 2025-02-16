@@ -21,7 +21,7 @@ from models.units import UniTS, UniTSArgs
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
 
 def get_args_parser():
-    parser = argparse.ArgumentParser('UniTS awaretraining', add_help=False)
+    parser = argparse.ArgumentParser('UniTS aware-training', add_help=False)
     parser.add_argument('--batch_size', default=64, type=int,
                         help='Batch size per GPU (effective batch size is batch_size * accum_iter * # gpus')
     parser.add_argument('--epochs', default=400, type=int)
@@ -35,13 +35,6 @@ def get_args_parser():
     parser.add_argument('--patch_len', default=8, type=int)
     parser.add_argument('--stride', default=8, type=int)
     parser.add_argument('--dropout', default=0.1, type=float)
-    
-    # Pretrain parameters
-    parser.add_argument('--min_mask_ratio', default=0.2, type=float)
-    parser.add_argument('--max_mask_ratio', default=0.4, type=float)
-    parser.add_argument('--lambda_recon', default=0.5, type=float)
-    parser.add_argument('--temperature', default=0.1, type=float)
-    parser.add_argument('--is_masked', action='store_true', help='masked reconstruction')
 
     # Optimizer parameters
     parser.add_argument('--weight_decay', type=float, default=0.05)
@@ -100,7 +93,7 @@ def train_one_epoch(model: UniTS,
 
     optimizer.zero_grad()
 
-    for data_iter_step, (_, imu_input, location_emb, _, sync_input, _) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
+    for data_iter_step, (_, imu_input, location_emb, _, sync_input, sync_emb) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
         if data_iter_step % accum_iter == 0:
             lr_sched.adjust_learning_rate(optimizer, data_iter_step / len(data_loader) + epoch, args)
 
@@ -108,17 +101,16 @@ def train_one_epoch(model: UniTS,
         sync_input = sync_input.to(device, non_blocking=True)
         if args.enable_aware:
             location_emb = location_emb.to(device, non_blocking=True)
+            sync_location_emb = sync_emb.to(device, non_blocking=True)
         else:
             location_emb = None
+            sync_location_emb = None
         
         with torch.cuda.amp.autocast():
-            loss, c_loss, r_loss = model(imu_input, prior_emb=location_emb, y=sync_input, 
-                                is_mask=args.is_masked, lambda_recon = args.lambda_recon,
-                                temperature=args.temperature)
+            loss = model(imu_input, prior_emb=location_emb, 
+                            y=sync_input, y_emb=sync_location_emb)
 
         loss_value = loss.item()
-        c_loss_value = c_loss.item()
-        r_loss_value = r_loss.item()
 
         if not math.isfinite(loss_value):
             print("Loss is {}, stopping training".format(loss_value))
@@ -134,8 +126,6 @@ def train_one_epoch(model: UniTS,
         torch.cuda.synchronize()
 
         metric_logger.update(loss=loss_value)
-        metric_logger.update(c_loss=c_loss_value)
-        metric_logger.update(r_loss=r_loss_value)
         lr = optimizer.param_groups[0]["lr"]
         metric_logger.update(lr=lr)
 
@@ -155,29 +145,26 @@ def evaluate(model: nn.Module,
     print_freq = 10
 
     with torch.no_grad():
-        for _, imu_input, location_emb, _, sync_input, sync_location_emb in metric_logger.log_every(data_loader, print_freq, header):
+        for _, imu_input, location_emb, _, sync_input, sync_emb in metric_logger.log_every(data_loader, print_freq, header):
             imu_input = imu_input.to(device, non_blocking=True)
-            sync_input = sync_input.to(device, non_blocking=True)
-            if args.enable_aware:
-                location_emb = location_emb.to(device, non_blocking=True)
-            else:
-                location_emb = None
+        sync_input = sync_input.to(device, non_blocking=True)
+        if args.enable_aware:
+            location_emb = location_emb.to(device, non_blocking=True)
+            sync_location_emb = sync_emb.to(device, non_blocking=True)
+        else:
+            location_emb = None
+            sync_location_emb = None
             
-            with torch.cuda.amp.autocast():
-                loss, c_loss, r_loss = model.forward(imu_input, prior_emb=location_emb, y=sync_input, 
-                                is_mask=args.is_masked, lambda_recon = args.lambda_recon,
-                                temperature=args.temperature)
+        with torch.cuda.amp.autocast():
+            loss = model(imu_input, prior_emb=location_emb, 
+                        y=sync_input, y_emb=sync_location_emb)
 
-            loss_value = loss.item()
-            c_loss_value = c_loss.item()
-            r_loss_value = r_loss.item()
-            if not math.isfinite(loss_value):
-                    print("Loss is {}, stopping evaluation".format(loss_value))
-                    sys.exit(1)
-        
-            metric_logger.update(loss=loss_value)
-            metric_logger.update(c_loss=c_loss_value)
-            metric_logger.update(r_loss=r_loss_value)
+        loss_value = loss.item()
+        if not math.isfinite(loss_value):
+                print("Loss is {}, stopping evaluation".format(loss_value))
+                sys.exit(1)
+    
+        metric_logger.update(loss=loss_value)
 
     metric_logger.synchronize_between_processes()
     print("Averaged stats for Vali:", metric_logger)

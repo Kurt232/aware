@@ -1,6 +1,0 @@
-NAME: shoaib
-TRAIN:
-  LOC:
-  - thigh
-  META:
-  - '/data/wjdu/hal3/data/80/shoaib.json'

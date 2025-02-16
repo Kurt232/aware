@@ -5,11 +5,11 @@ TRAIN:
   - chest
   - ankle
   META:
-  - '/data/wjdu/hal3/data/5/pamap2.json'
+  - '/data/wjdu/hal4/data/5/pamap2.json'
 TEST:
   LOC:
   - wrist
   - chest
   - ankle
   META:
-  - '/data/wjdu/hal3/data/10_r/pamap2.json'
+  - '/data/wjdu/hal4/data/10_r/pamap2.json'

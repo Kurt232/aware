@@ -49,13 +49,11 @@ class IMUDataset(Dataset):
             'walk': 6
         }
 
-        with open('/home/wjdu/ctx_aware_pamap2/pamap2_embs.pkl', 'rb') as f:
+        with open('/home/wjdu/ctx_aware_pamap2/pamap2_loc_14B.pkl', 'rb') as f:
             embs = pickle.load(f)
         self.embs = {}
         for l in loc:
-            self.embs[l] = {}
-            for u_id, embeddings in embs[l].items():
-                self.embs[l][u_id] = embeddings.requires_grad_(False)
+            self.embs[l] = embs[l].requires_grad_(False)
 
     def __len__(self):
         return len(self.data_list)
@@ -73,7 +71,7 @@ class IMUDataset(Dataset):
         imu_input = torch.tensor(imu_data, dtype=torch.float32)
         label = torch.tensor([self.mapping[caption]], dtype=torch.int8)
         
-        ctx_emb = self.embs[location][user_id]
+        ctx_emb = self.embs[location]
         return label, imu_input, ctx_emb, data_id
 
 
@@ -109,7 +107,11 @@ class IMUSyncDataset(Dataset):
             'walk': 6
         }
 
+        with open('/home/wjdu/ctx_aware_pamap2/pamap2_loc_14B.pkl', 'rb') as f:
+            embs = pickle.load(f)
         self.location_embs = {}
+        for l in loc:
+            self.location_embs[l] = embs[l].requires_grad_(False)
 
     def __len__(self):
         return len(self.data_list)
@@ -127,7 +129,7 @@ class IMUSyncDataset(Dataset):
         s_id = sample['subject_id']
         # Find potential sync data
         matches = self.data_list[
-            # (self.data_list['offset'] == offset) & 
+            (self.data_list['offset'] == offset) & 
             (self.data_list['output'] == caption) &
             (self.data_list['subject_id'] == s_id) &
             (self.data_list['data_id'] != data_id) # exclude current data
@@ -146,6 +148,8 @@ class IMUSyncDataset(Dataset):
         
         if self.is_rotated:
             imu_data = random_rotation(origin_data)
+        else:
+            imu_data = origin_data
 
         imu_input = torch.tensor(imu_data, dtype=torch.float32)            
         return label, imu_input, location_emb, data_id, sync_input, sync_location_emb

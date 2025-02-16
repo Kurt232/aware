@@ -13,6 +13,8 @@ GPUS=$4
 NNODE=$(($(echo $GPUS | tr -cd , | wc -c) + 1))
 commit_hash=$(git rev-parse --short HEAD 2>/dev/null)
 
+LOAD_PATH="/data/wjdu/hal4/pretrain/w/checkpoint-199.pth"
+
 TASK_LEN=$(ls $DATA_CONFIGS/*.yaml | wc -l)
 CURRENT_IDX=0
     

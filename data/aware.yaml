@@ -1,9 +1,8 @@
-NAME: 'multi'
+NAME: pamap2
 TRAIN:
-    LOC:
-        - "upperarm"
-        - "wrist"
-        - "waist"
-        - "thigh"
-    META:
-        - '/data/wjdu/hal/data_sync/90/realworld.json' # 90% realworld
+  LOC:
+  - wrist
+  - chest
+  - ankle
+  META:
+  - '/data/wjdu/hal4/data/80/pamap2.json'

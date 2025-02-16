@@ -743,7 +743,7 @@ class UniTS(nn.Module):
             self.phase = 'all'
         elif task == 'cls':
             self.phase = args.phase
-        elif task == 'clr':
+        elif task == 'clr' or task == 'aware':
             self.phase = 'all'
         else:
             raise ValueError(f"Invalid task: {task}, should be 'recon', 'clr' or 'cls'")
@@ -898,7 +898,7 @@ class UniTS(nn.Module):
         r_loss = lambda_recon * calculate_reconstruct_loss(seq, mask_dec_out, mask_seq)
         return r_loss
     
-    def contrast(self, x, y, temperature=0.07, prior_emb=None):
+    def contrast(self, x, y, prior_emb=None, y_emb=None):
         """
         contrastive learning
         aim to reduce the gap between x and y
@@ -913,17 +913,19 @@ class UniTS(nn.Module):
         # with torch.no_grad():
         y_clip_prompt = torch.zeros(y.shape[0], y.shape[1], 1, y.shape[-1], device=y.device)
         y = torch.cat((y, y_clip_prompt), dim=2)
-        y = self.backbone(y, prior_emb) # [B, V, L, C]
+        y = self.backbone(y, y_emb) # [B, V, L, C]
         y_clip_token = y[:, :, -1, :].mean(1) # [B, C]
 
-        c_loss = calculate_contrast_loss(x_clip_token, y_clip_token, temperature)
+        c_loss = calculate_contrast_loss(x_clip_token, y_clip_token)
 
         return c_loss
     
-    def forward(self, x, prior_emb=None):
+    def forward(self, x, prior_emb=None, y=None, y_emb=None):
         # x: [B, L, V]
         if prior_emb is not None:
             prior_emb = self.ctx_proj(prior_emb)
+        if y_emb is not None:
+            y_emb = self.ctx_proj(y_emb)
         
         if self.task == 'cls':
             x, _, _ = self.tokenize(x)
@@ -943,7 +945,13 @@ class UniTS(nn.Module):
             y = random_rotation(y)
             y, _, _ = self.tokenize(y)
 
-            return self.contrast(x, y, prior_emb=prior_emb)
+            return self.contrast(x, y, prior_emb=prior_emb, y_emb=prior_emb)
+        elif self.task == 'aware':
+            x, _, _ = self.tokenize(x)
+            y, _, _ = self.tokenize(y)
+            return self.contrast(x, y, prior_emb, y_emb)
+        else:
+            raise ValueError(f"Invalid task: {self.task}, should be 'recon', 'clr' , 'aware', or 'cls'")
 
 @dataclass
 class UniTSArgs:

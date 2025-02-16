@@ -5,5 +5,5 @@ TRAIN:
   - chest
   - ankle
   META:
-  - '/data/wjdu/hal3/data/80/pamap2.json'
+  - '/data/wjdu/hal4/data/80/pamap2.json'
 
